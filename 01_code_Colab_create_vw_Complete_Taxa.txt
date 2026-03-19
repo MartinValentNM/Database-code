@@ -1,0 +1,88 @@
+# Instalace potřebné knihovny pro formátování Excelu
+!pip install xlsxwriter -q
+
+import pandas as pd
+from google.colab import files
+import io
+
+# 1. NAHRÁNÍ ZDROJOVÝCH DAT
+print("--- KROK 1: Nahrajte svá surová data (XLSX) ---")
+uploaded = files.upload()
+
+if not uploaded:
+    print("Žádný soubor nebyl vybrán.")
+else:
+    file_name = list(uploaded.keys())[0]
+    df_raw = pd.read_excel(io.BytesIO(uploaded[file_name]))
+
+    # 2. DEFINICE STRUKTURY
+    struktura = {
+        'Taxa': ['ID', 'TAXON', 'Genus', 'Species', 'AUTHOR', 'Phylum', 'Family', 'Order', 'Class', 'Rank'],
+        'Taxa_Taxonomie': ['TaxonID', 'TAXONOMIC PLACEMENT', 'Taxonomy_path', 'TAXON', 'TYPE TAXON', 'INCLUDED TAXONS'],
+        'Taxa_Popis': ['TaxonID', 'ETYMOLOGY', 'DESCRIPTION', 'SIZE', 'DIAGNOSIS', 'APERTURE', 'CROSS-SECTION', 'OPERCULUM', 'SCULPTURE', 'CLAVICLES', 'CARDINAL_PROCESSES'],
+        'Taxa_Material': ['TaxonID', 'TYPE MATERIAL', 'MATERIAL EXAMINED', 'FIGURES', 'SYNONYMY'],
+        'Taxa_Vyskyt': ['TaxonID', 'OCCURRENCE', 'Geography', 'Locality', 'STRATIGRAPHY', 'System', 'Formation', 'Member', 'Stage', 'Serie', 'Zone', 'Horizon'],
+        'Taxa_Poznamky': ['TaxonID', 'REMARKS', 'Reference', ]
+    }
+
+    def transformuj_a_stahni(df_vstup):
+        print("\n--- KROK 2: Generuji soubor vw_Complete_Taxa.xlsx se všemi listy ---")
+
+        # Příprava ID
+        if 'ID' not in df_vstup.columns:
+            df_vstup.insert(0, 'ID', range(1, len(df_vstup) + 1))
+        df_vstup['TaxonID'] = df_vstup['ID']
+
+        # Hledání neznámých sloupců
+        vsechny_znamy_sloupce = []
+        for s in struktura.values():
+            vsechny_znamy_sloupce.extend(s)
+        vsechny_znamy_sloupce = set(vsechny_znamy_sloupce)
+        neznami_sloupce = [c for c in df_vstup.columns if c not in vsechny_znamy_sloupce and c not in ['TaxonID', 'ID']]
+
+        # Cílový soubor
+        vystupni_soubor = 'vw_Complete_Taxa.xlsx'
+
+        with pd.ExcelWriter(vystupni_soubor, engine='xlsxwriter') as writer:
+            # A. NEJDŘÍVE HLAVNÍ PŘEHLED (vw_Complete_Taxa)
+            df_query = df_vstup.drop(columns=['TaxonID'])
+            df_query.to_excel(writer, sheet_name='vw_Complete_Taxa', index=False)
+
+            workbook  = writer.book
+            fmt_blue = workbook.add_format({'bold': True, 'fg_color': '#BDD7EE', 'border': 1})
+            ws_query = writer.sheets['vw_Complete_Taxa']
+
+            # Nastavení šířky sloupců a formátování záhlaví pro Query
+            for col_num, value in enumerate(df_query.columns.values):
+                ws_query.write(0, col_num, value, fmt_blue)
+                ws_query.set_column(col_num, col_num, 15) # Základní šířka
+
+            # B. JEDNOTLIVÉ LISTY PRO DATABÁZI
+            fmt_green = workbook.add_format({'bold': True, 'fg_color': '#D7E4BC', 'border': 1})
+
+            for list_name, sloupce in struktura.items():
+                aktualni_sloupce = sloupce.copy()
+                if list_name == 'Taxa_Poznamky':
+                    aktualni_sloupce.extend(neznami_sloupce)
+
+                df_list = pd.DataFrame()
+                for col in aktualni_sloupce:
+                    if col in df_vstup.columns:
+                        df_list[col] = df_vstup[col]
+                    else:
+                        df_list[col] = ""
+
+                df_list.to_excel(writer, sheet_name=list_name, index=False)
+
+                ws = writer.sheets[list_name]
+                for col_num, value in enumerate(df_list.columns.values):
+                    ws.write(0, col_num, value, fmt_green)
+                    ws.set_column(col_num, col_num, 15)
+
+                print(f"List '{list_name}' vytvořen.")
+
+        print("\n--- HOTOVO! ---")
+        files.download(vystupni_soubor)
+
+    # Spuštění
+    transformuj_a_stahni(df_raw)

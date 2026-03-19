@@ -1,0 +1,968 @@
+' ============================================================
+' PACKAGE 3 - IMPORT / EXPORT
+' Spustit: BuildForms_3_ImportExport
+' Creates: frmImportCSV, frmImportXlsx, frmExportDocx, frmBatchDocx, frmBibTex
+' ============================================================
+
+Option Compare Database
+Option Explicit
+
+' ===== COLORS =====
+Private Const C_BG As Long = &H202020
+Private Const C_PANEL As Long = &H2B2B2B
+Private Const C_ACCENT As Long = &HFF8C00
+Private Const C_TEXT As Long = &HFFFFFF
+Private Const C_DIM As Long = &HC0C0C0
+Private Const C_BORDER As Long = &H444444
+
+Private Sub CreateImportCSVForm()
+    On Error Resume Next
+    DoCmd.DeleteObject acForm, "frmImportCSV"
+    On Error GoTo 0
+
+    Dim f As Form: Set f = CreateForm
+    Dim fn As String: fn = f.Name
+    With f
+        .Caption = "Import from CSV"
+        .Width = 11000: .PopUp = True: .Modal = True
+        .ScrollBars = 0: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 1
+        .Section(acDetail).BackColor = &H202020
+        .Section(acDetail).Height = 8000
+    End With
+
+    Dim c As Control
+    ' Nadpis
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 10000, 500)
+    c.Caption = "Import taxa from CSV file": c.ForeColor = &HFFFFFF: c.BackStyle = 0: c.FontSize = 14: c.FontBold = True
+
+    ' Cesta k souboru
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 900, 2000, 400)
+    c.Caption = "CSV file:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 200, 1380, 8200, 500)
+    c.Name = "txtCSVPath": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 10
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 8600, 1350, 2000, 560)
+    c.Name = "btnBrowse": c.Caption = "BROWSE...": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.OnClick = "[Event Procedure]"
+
+    ' Separator
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 2200, 2500, 400)
+    c.Caption = "Delimiter (default ,):": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 2800, 2160, 600, 500)
+    c.Name = "txtSep": c.DefaultValue = """,""": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 11
+
+    ' Checkbox - first row = header
+    Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 2950, 300, 300)
+    c.Name = "chkHeader": c.DefaultValue = "-1"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 2930, 4000, 400)
+    c.Caption = "First row contains column names": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+
+    ' Checkbox - skip duplicates
+    Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 3450, 300, 300)
+    c.Name = "chkSkipDups": c.DefaultValue = "-1"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 3430, 5000, 400)
+    c.Caption = "Skip records with existing TAXON": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+
+    ' Results log
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 200, 4100, 10400, 2200)
+    c.Name = "txtLog": c.BackColor = &H1A1A1A: c.ForeColor = &HFF8C00
+     c.FontSize = 9: c.Locked = True: c.BorderColor = &H444444
+
+    ' Buttons
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 200, 6600, 2200, 600)
+    c.Name = "btnPreview": c.Caption = "PREVIEW (10 rows)": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 2600, 6600, 2000, 600)
+    c.Name = "btnImport": c.Caption = "IMPORT": c.BackColor = &H228844: c.ForeColor = &HFFFFFF
+    c.FontSize = 11: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 4800, 6600, 1800, 600)
+    c.Name = "btnClose": c.Caption = "CLOSE": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 11: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Dim vba As String
+    vba = "Private Sub btnBrowse_Click()" & vbCrLf
+    vba = vba & "    Dim fd As Object: Set fd = Application.FileDialog(3)" & vbCrLf
+    vba = vba & "    fd.Title = ""Select CSV file""" & vbCrLf
+    vba = vba & "    fd.Filters.Clear: fd.Filters.Add ""CSV"", ""*.csv"": fd.Filters.Add ""Vsechny"", ""*.*""" & vbCrLf
+    vba = vba & "    If fd.Show Then Me!txtCSVPath.Value = fd.SelectedItems(1)" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnPreview_Click()" & vbCrLf
+    vba = vba & "    Dim path As String: path = Nz(Me!txtCSVPath.Value, """")" & vbCrLf
+    vba = vba & "    If path = """" Then MsgBox ""Enter file path."", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim sep As String: sep = Nz(Me!txtSep.Value, "","")" & vbCrLf
+    vba = vba & "    Dim log As String: log = ""=== PREVIEW (first 10 data rows) ==="" & Chr(10)" & vbCrLf
+    vba = vba & "    Dim f As Integer: f = FreeFile" & vbCrLf
+    vba = vba & "    Open path For Input As #f" & vbCrLf
+    vba = vba & "    Dim lineNum As Integer: lineNum = 0" & vbCrLf
+    vba = vba & "    Dim headers As String" & vbCrLf
+    vba = vba & "    Do While Not EOF(f) And lineNum <= 10" & vbCrLf
+    vba = vba & "        Dim ln As String: Line Input #f, ln" & vbCrLf
+    vba = vba & "        If lineNum = 0 And Me!chkHeader Then" & vbCrLf
+    vba = vba & "            headers = ln: log = log & ""COLUMNS: "" & ln & Chr(10) & String(60, ""-"") & Chr(10)" & vbCrLf
+    vba = vba & "        Else" & vbCrLf
+    vba = vba & "            log = log & ln & Chr(10)" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    vba = vba & "        lineNum = lineNum + 1" & vbCrLf
+    vba = vba & "    Loop" & vbCrLf
+    vba = vba & "    Close #f" & vbCrLf
+    vba = vba & "    Me!txtLog.Value = log" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnImport_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo ImpErr" & vbCrLf
+    vba = vba & "    Dim path As String: path = Nz(Me!txtCSVPath.Value, """")" & vbCrLf
+    vba = vba & "    If path = """" Then MsgBox ""Enter file path."", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    If MsgBox(""Import records from CSV?"", vbYesNo + vbQuestion) <> vbYes Then Exit Sub" & vbCrLf
+    vba = vba & "    Dim sep As String: sep = Nz(Me!txtSep.Value, "","")" & vbCrLf
+    vba = vba & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    vba = vba & "    Dim f As Integer: f = FreeFile" & vbCrLf
+    vba = vba & "    Open path For Input As #f" & vbCrLf
+    vba = vba & "    Dim headers() As String" & vbCrLf
+    vba = vba & "    Dim lineNum As Long: lineNum = 0" & vbCrLf
+    vba = vba & "    Dim imported As Long, skipped As Long, errors As Long" & vbCrLf
+    vba = vba & "    Dim log As String: log = " & Chr(34) & Chr(34) & vbCrLf
+    vba = vba & "    Do While Not EOF(f)" & vbCrLf
+    vba = vba & "        Dim ln As String: Line Input #f, ln" & vbCrLf
+    vba = vba & "        ln = Trim(ln)" & vbCrLf
+    vba = vba & "        If ln = """" Then GoTo NextLine" & vbCrLf
+    vba = vba & "        Dim cols() As String: cols = Split(ln, sep)" & vbCrLf
+    vba = vba & "        If lineNum = 0 And Me!chkHeader Then" & vbCrLf
+    vba = vba & "            headers = cols: lineNum = lineNum + 1: GoTo NextLine" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    vba = vba & "        ' Find TAXON column index" & vbCrLf
+    vba = vba & "        Dim taxonIdx As Integer: taxonIdx = -1" & vbCrLf
+    vba = vba & "        Dim hi As Integer" & vbCrLf
+    vba = vba & "        For hi = 0 To UBound(headers)" & vbCrLf
+    vba = vba & "            If UCase(Trim(headers(hi))) = ""TAXON"" Then taxonIdx = hi" & vbCrLf
+    vba = vba & "        Next hi" & vbCrLf
+    vba = vba & "        ' Zkontroluj duplicitu" & vbCrLf
+    vba = vba & "        If taxonIdx >= 0 And taxonIdx <= UBound(cols) And Me!chkSkipDups Then" & vbCrLf
+    vba = vba & "            Dim taxVal As String: taxVal = Trim(cols(taxonIdx))" & vbCrLf
+    vba = vba & "            Dim existing As Long" & vbCrLf
+    vba = vba & "            existing = Nz(DCount(""ID"", ""Taxa"", ""TAXON='"" & Replace(taxVal, ""'"", ""''"") & ""'""), 0)" & vbCrLf
+    vba = vba & "            If existing > 0 Then skipped = skipped + 1: log = log & ""SKIP: "" & taxVal & Chr(10): GoTo NextLine" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    vba = vba & "        ' Insert new record into Taxa" & vbCrLf
+    vba = vba & "        On Error Resume Next" & vbCrLf
+    vba = vba & "        Dim rsNew As DAO.Recordset: Set rsNew = db.OpenRecordset(""Taxa"", dbOpenDynaset)" & vbCrLf
+    vba = vba & "        rsNew.AddNew" & vbCrLf
+    vba = vba & "        For hi = 0 To UBound(headers)" & vbCrLf
+    vba = vba & "            If hi <= UBound(cols) Then" & vbCrLf
+    vba = vba & "                Dim hName As String: hName = Trim(headers(hi))" & vbCrLf
+    vba = vba & "                Dim hVal As String: hVal = Trim(cols(hi))" & vbCrLf
+    vba = vba & "                ' Remove quotes" & vbCrLf
+    vba = vba & "                If Left(hVal, 1) = Chr(34) And Right(hVal, 1) = Chr(34) Then hVal = Mid(hVal, 2, Len(hVal) - 2)" & vbCrLf
+    vba = vba & "                On Error Resume Next" & vbCrLf
+    vba = vba & "                rsNew.Fields(hName) = hVal" & vbCrLf
+    vba = vba & "            End If" & vbCrLf
+    vba = vba & "        Next hi" & vbCrLf
+    vba = vba & "        rsNew.Update: rsNew.Close" & vbCrLf
+    vba = vba & "        imported = imported + 1" & vbCrLf
+    vba = vba & "        GoTo NextLine" & vbCrLf
+    vba = vba & "        NextLine:" & vbCrLf
+    vba = vba & "        lineNum = lineNum + 1" & vbCrLf
+    vba = vba & "    Loop" & vbCrLf
+    vba = vba & "    Close #f" & vbCrLf
+    vba = vba & "    Me!txtLog.Value = ""RESULT: "" & imported & "" imported, "" & skipped & "" skipped"" & Chr(10) & log" & vbCrLf
+    vba = vba & "    If imported > 0 Then Parent.subResults.Form.Requery" & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "ImpErr: errors = errors + 1: log = log & ""ERR "" & lineNum & "": "" & Err.Description & Chr(10): Resume NextLine" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf & _
+        "    If KeyCode = 27 Then DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf & _
+        "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnClose_Click(): DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tCSV As String: tCSV = f.Name
+    DoCmd.Close acForm, tCSV, acSaveYes
+    DoCmd.CopyObject , "frmImportCSV", acForm, tCSV
+    DoCmd.DeleteObject acForm, tCSV
+End Sub
+
+Private Sub CreateImportXlsxForm()
+    On Error Resume Next: DoCmd.DeleteObject acForm, "frmImportXlsx": On Error GoTo 0
+    Dim f As Form: Set f = CreateForm: Dim fn As String: fn = f.Name
+    With f
+        .Caption = "Import from Excel (XLSX)": .Width = 14000: .PopUp = True: .Modal = False
+        .ScrollBars = 0: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 2
+        .Section(acDetail).BackColor = &H202020: .Section(acDetail).Height = 16000
+    End With
+    Dim c As Control
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 13000, 600)
+    c.Caption = "IMPORT FROM EXCEL (.xlsx)": c.ForeColor = &H228844: c.BackStyle = 0: c.FontSize = 14: c.FontBold = True
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 950, 2000, 400)
+    c.Caption = "Excel file:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 2300, 920, 8500, 500)
+    c.Name = "txtXlsxFile": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 10
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 11000, 890, 2700, 560)
+    c.Name = "btnBrowseXlsx": c.Caption = "BROWSE...": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.FontSize = 10: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 1650, 2000, 400)
+    c.Caption = "Sheet name:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 2300, 1620, 3000, 500)
+    c.Name = "txtSheetName": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 10
+    c.DefaultValue = """Sheet1"""
+
+    Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 2350, 300, 300)
+    c.Name = "chkHeader": c.DefaultValue = "-1"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 2330, 5000, 400)
+    c.Caption = "First row contains column names": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+
+    Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 2900, 300, 300)
+    c.Name = "chkSkipDups": c.DefaultValue = "-1"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 2880, 8000, 400)
+    c.Caption = "Skip duplicates (same TAXON name already exists)": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 3600, 13000, 350)
+    c.Caption = "Column mapping (Excel column header -> DB field) - auto-detected, manual override:": c.ForeColor = &H888888: c.BackStyle = 0: c.FontSize = 9
+
+    ' 3 columns of 2 field mappings each
+    Dim mapFields(19) As String, mapDefaults(19) As String
+    mapFields(0) = "txtMapTaxon":        mapDefaults(0) = "TAXON"
+    mapFields(1) = "txtMapAuthor":       mapDefaults(1) = "AUTHOR"
+    mapFields(2) = "txtMapRank":         mapDefaults(2) = "Rank"
+    mapFields(3) = "txtMapGenus":        mapDefaults(3) = "Genus"
+    mapFields(4) = "txtMapFamily":       mapDefaults(4) = "Family"
+    mapFields(5) = "txtMapOrder":        mapDefaults(5) = "Order"
+    mapFields(6) = "txtMapGeog":         mapDefaults(6) = "Geography"
+    mapFields(7) = "txtMapStrat":        mapDefaults(7) = "STRATIGRAPHY"
+    mapFields(8) = "txtMapDesc":         mapDefaults(8) = "DESCRIPTION"
+    mapFields(9) = "txtMapSyn":          mapDefaults(9) = "SYNONYMY"
+    mapFields(10) = "txtMapDiag":        mapDefaults(10) = "DIAGNOSIS"
+    mapFields(11) = "txtMapEtym":        mapDefaults(11) = "ETYMOLOGY"
+    mapFields(12) = "txtMapOccur":       mapDefaults(12) = "OCCURRENCE"
+    mapFields(13) = "txtMapSystem":      mapDefaults(13) = "System"
+    mapFields(14) = "txtMapFormation":   mapDefaults(14) = "Formation"
+    mapFields(15) = "txtMapStage":       mapDefaults(15) = "Stage"
+    mapFields(16) = "txtMapFigures":     mapDefaults(16) = "FIGURES"
+    mapFields(17) = "txtMapTypeMat":     mapDefaults(17) = "TYPE MATERIAL"
+    mapFields(18) = "txtMapMatEx":       mapDefaults(18) = "MATERIAL EXAMINED"
+    mapFields(19) = "txtMapRemarks":     mapDefaults(19) = "REMARKS"
+    Dim mi As Integer
+    For mi = 0 To 19
+        Dim mx As Long: mx = (mi Mod 2) * 6500 + 200
+        Dim my As Long: my = 4100 + (mi \ 2) * 550
+        Set c = CreateControl(fn, acLabel, acDetail, "", "", mx, my + 80, 2000, 350)
+        c.Caption = mapDefaults(mi) & ":": c.ForeColor = &H888888: c.BackStyle = 0: c.FontSize = 9
+        Set c = CreateControl(fn, acTextBox, acDetail, "", "", mx + 2100, my, 4000, 450)
+        c.Name = mapFields(mi): c.DefaultValue = mapDefaults(mi): c.BackColor = &H252525: c.ForeColor = &HFFFFFF: c.BorderColor = &H333333: c.FontSize = 9
+    Next mi
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 200, 6900, 2500, 600)
+    c.Name = "btnImportXlsx": c.Caption = "START IMPORT": c.BackColor = &H228844: c.ForeColor = &HFFFFFF
+    c.FontSize = 11: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 2900, 6900, 1500, 600)
+    c.Name = "btnCloseXlsx": c.Caption = "CLOSE": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 7800, 13400, 400)
+    c.Name = "lblXlsxStatus": c.Caption = "": c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 200, 8400, 13400, 2800)
+    c.Name = "txtXlsxLog": c.Locked = True: c.BackColor = &H1A1A1A
+    c.ForeColor = &H888888: c.FontSize = 9: c.BorderColor = &H333333
+
+    Dim q As String: q = Chr(34)
+    Dim vba As String
+    vba = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnBrowseXlsx_Click()" & vbCrLf
+    vba = vba & "    Dim fd As Object: Set fd = Application.FileDialog(1)" & vbCrLf
+    vba = vba & "    fd.Title = " & q & "Select Excel file" & q & vbCrLf
+    vba = vba & "    fd.Filters.Clear: fd.Filters.Add " & q & "Excel files" & q & ", " & q & "*.xlsx;*.xls;*.xlsm" & q & vbCrLf
+    vba = vba & "    If fd.Show Then Me!txtXlsxFile.Value = fd.SelectedItems(1)" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnImportXlsx_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo XlsxErr" & vbCrLf
+    vba = vba & "    Dim fPath As String: fPath = Nz(Me!txtXlsxFile.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    If fPath = " & q & q & " Or Dir(fPath) = " & q & q & " Then MsgBox " & q & "Excel file not found." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim shName As String: shName = Nz(Me!txtSheetName.Value, " & q & "Sheet1" & q & ")" & vbCrLf
+    vba = vba & "    Me!lblXlsxStatus.Caption = " & q & "Connecting to Excel..." & q & ": DoEvents" & vbCrLf
+    ' Use ADO/ADOX to read XLSX
+    vba = vba & "    Dim connStr As String: connStr = " & q & "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & q & " & fPath & " & q & ";Extended Properties='Excel 12.0 Xml;HDR=" & q & " & IIf(Me!chkHeader, " & q & "YES" & q & ", " & q & "NO" & q & ") & " & q & ";IMEX=1'" & q & vbCrLf
+    vba = vba & "    Dim cn As Object: Set cn = CreateObject(" & q & "ADODB.Connection" & q & ")" & vbCrLf
+    vba = vba & "    cn.Open connStr" & vbCrLf
+    vba = vba & "    Dim rs As Object: Set rs = CreateObject(" & q & "ADODB.Recordset" & q & ")" & vbCrLf
+    vba = vba & "    rs.Open " & q & "SELECT * FROM [" & q & " & shName & " & q & "$]" & q & ", cn" & vbCrLf
+    ' Sloupec mapping
+    vba = vba & "    Dim colTaxon As String: colTaxon = Nz(Me!txtMapTaxon.Value, " & q & "TAXON" & q & ")" & vbCrLf
+    vba = vba & "    Dim colAuthor As String: colAuthor = Nz(Me!txtMapAuthor.Value, " & q & "AUTHOR" & q & ")" & vbCrLf
+    vba = vba & "    Dim colRank As String: colRank = Nz(Me!txtMapRank.Value, " & q & "Rank" & q & ")" & vbCrLf
+    vba = vba & "    Dim colGenus As String: colGenus = Nz(Me!txtMapGenus.Value, " & q & "Genus" & q & ")" & vbCrLf
+    vba = vba & "    Dim colFamily As String: colFamily = Nz(Me!txtMapFamily.Value, " & q & "Family" & q & ")" & vbCrLf
+    vba = vba & "    Dim colOrder As String: colOrder = Nz(Me!txtMapOrder.Value, " & q & "Order" & q & ")" & vbCrLf
+    vba = vba & "    Dim colGeog As String: colGeog = Nz(Me!txtMapGeog.Value, " & q & "Geography" & q & ")" & vbCrLf
+    vba = vba & "    Dim colStrat As String: colStrat = Nz(Me!txtMapStrat.Value, " & q & "Stratigraphy" & q & ")" & vbCrLf
+    vba = vba & "    Dim colDesc As String: colDesc = Nz(Me!txtMapDesc.Value, " & q & "DESCRIPTION" & q & ")" & vbCrLf
+    vba = vba & "    Dim colSyn As String: colSyn = Nz(Me!txtMapSyn.Value, " & q & "SYNONYMY" & q & ")" & vbCrLf
+    vba = vba & "    Dim colDiag As String: colDiag = Nz(Me!txtMapDiag.Value, " & q & "DIAGNOSIS" & q & ")" & vbCrLf
+    vba = vba & "    Dim colEtym As String: colEtym = Nz(Me!txtMapEtym.Value, " & q & "ETYMOLOGY" & q & ")" & vbCrLf
+    vba = vba & "    Dim colOccur As String: colOccur = Nz(Me!txtMapOccur.Value, " & q & "OCCURRENCE" & q & ")" & vbCrLf
+    vba = vba & "    Dim colSystem As String: colSystem = Nz(Me!txtMapSystem.Value, " & q & "System" & q & ")" & vbCrLf
+    vba = vba & "    Dim colFormation As String: colFormation = Nz(Me!txtMapFormation.Value, " & q & "Formation" & q & ")" & vbCrLf
+    vba = vba & "    Dim colStage As String: colStage = Nz(Me!txtMapStage.Value, " & q & "Stage" & q & ")" & vbCrLf
+    vba = vba & "    Dim colFigures As String: colFigures = Nz(Me!txtMapFigures.Value, " & q & "FIGURES" & q & ")" & vbCrLf
+    vba = vba & "    Dim colTypeMat As String: colTypeMat = Nz(Me!txtMapTypeMat.Value, " & q & "TYPE MATERIAL" & q & ")" & vbCrLf
+    vba = vba & "    Dim colMatEx As String: colMatEx = Nz(Me!txtMapMatEx.Value, " & q & "MATERIAL EXAMINED" & q & ")" & vbCrLf
+    vba = vba & "    Dim colRemarks As String: colRemarks = Nz(Me!txtMapRemarks.Value, " & q & "REMARKS" & q & ")" & vbCrLf
+    ' Helper function for safe column reading
+    vba = vba & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    vba = vba & "    Dim nImp As Long: nImp = 0: Dim nSkip As Long: nSkip = 0: Dim nErr As Long: nErr = 0" & vbCrLf
+    vba = vba & "    Dim log As String: log = " & q & q & vbCrLf
+    vba = vba & "    Do While Not rs.EOF" & vbCrLf
+    vba = vba & "        On Error Resume Next" & vbCrLf
+    vba = vba & "        Dim taxon As String: taxon = Trim(Nz(rs.Fields(colTaxon).Value, " & q & q & "))" & vbCrLf
+    vba = vba & "        If taxon = " & q & q & " Then rs.MoveNext: GoTo NextXlsxRow" & vbCrLf
+    vba = vba & "        ' Skip duplicates" & vbCrLf
+    vba = vba & "        If Me!chkSkipDups Then" & vbCrLf
+    vba = vba & "            If DCount(" & q & "*" & q & ", " & q & "Taxa" & q & ", " & q & "TAXON='" & q & " & Replace(taxon," & q & "'" & q & "," & q & "''" & q & ") & " & q & "'" & q & ") > 0 Then" & vbCrLf
+    vba = vba & "                nSkip = nSkip + 1: rs.MoveNext: GoTo NextXlsxRow" & vbCrLf
+    vba = vba & "            End If" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    ' Insert into Taxa
+    vba = vba & "        Dim rsTaxa As DAO.Recordset: Set rsTaxa = db.OpenRecordset(" & q & "Taxa" & q & ", dbOpenDynaset)" & vbCrLf
+    vba = vba & "        rsTaxa.AddNew" & vbCrLf
+    vba = vba & "        rsTaxa!TAXON = taxon" & vbCrLf
+    vba = vba & "        rsTaxa!AUTHOR = Nz(rs.Fields(colAuthor).Value, " & q & q & ")" & vbCrLf
+    vba = vba & "        rsTaxa!Rank = Nz(rs.Fields(colRank).Value, " & q & q & ")" & vbCrLf
+    vba = vba & "        rsTaxa!Genus = Nz(rs.Fields(colGenus).Value, " & q & q & ")" & vbCrLf
+    vba = vba & "        rsTaxa!Family = Nz(rs.Fields(colFamily).Value, " & q & q & ")" & vbCrLf
+    vba = vba & "        On Error Resume Next: rsTaxa![Order] = Nz(rs.Fields(colOrder).Value, " & q & q & "): On Error GoTo 0" & vbCrLf
+    vba = vba & "        rsTaxa.Update: Dim newID As Long: newID = rsTaxa!ID: rsTaxa.Close" & vbCrLf
+    ' Insert related records
+    vba = vba & "        Dim sDesc As String: sDesc = Replace(Nz(rs.Fields(colDesc).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        Dim sDiag As String: sDiag = Replace(Nz(rs.Fields(colDiag).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        Dim sEtym As String: sEtym = Replace(Nz(rs.Fields(colEtym).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        db.Execute " & q & "INSERT INTO Taxa_Popis (TaxonID, ETYMOLOGY, DESCRIPTION, DIAGNOSIS) VALUES (" & q & " & newID & " & q & ", '" & q & " & sEtym & " & q & "', '" & q & " & sDesc & " & q & "', '" & q & " & sDiag & " & q & "')" & q & ", 128" & vbCrLf
+    vba = vba & "        Dim sSyn As String: sSyn = Replace(Nz(rs.Fields(colSyn).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        Dim sTyp As String: sTyp = Replace(Nz(rs.Fields(colTypeMat).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        Dim sMat As String: sMat = Replace(Nz(rs.Fields(colMatEx).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        Dim sFig As String: sFig = Replace(Nz(rs.Fields(colFigures).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        db.Execute " & q & "INSERT INTO Taxa_Material (TaxonID, [TYPE MATERIAL], [MATERIAL EXAMINED], FIGURES, SYNONYMY) VALUES (" & q & " & newID & " & q & ", '" & q & " & sTyp & " & q & "', '" & q & " & sMat & " & q & "', '" & q & " & sFig & " & q & "', '" & q & " & sSyn & " & q & "')" & q & ", 128" & vbCrLf
+    vba = vba & "        Dim sGeog As String: sGeog = Replace(Nz(rs.Fields(colGeog).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        Dim sStrat As String: sStrat = Replace(Nz(rs.Fields(colStrat).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        Dim sOccur As String: sOccur = Replace(Nz(rs.Fields(colOccur).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        Dim sSyst As String: sSyst = Replace(Nz(rs.Fields(colSystem).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        Dim sForm As String: sForm = Replace(Nz(rs.Fields(colFormation).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        Dim sStage As String: sStage = Replace(Nz(rs.Fields(colStage).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        db.Execute " & q & "INSERT INTO Taxa_Vyskyt (TaxonID, Geography, STRATIGRAPHY, OCCURRENCE, System, Formation, Stage) VALUES (" & q & " & newID & " & q & ", '" & q & " & sGeog & " & q & "', '" & q & " & sStrat & " & q & "', '" & q & " & sOccur & " & q & "', '" & q & " & sSyst & " & q & "', '" & q & " & sForm & " & q & "', '" & q & " & sStage & " & q & "')" & q & ", 128" & vbCrLf
+    vba = vba & "        db.Execute " & q & "INSERT INTO Taxa_Taxonomie (TaxonID) VALUES (" & q & " & newID & " & q & ")" & q & ", 128" & vbCrLf
+    vba = vba & "        Dim sRem As String: sRem = Replace(Nz(rs.Fields(colRemarks).Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ")" & vbCrLf
+    vba = vba & "        db.Execute " & q & "INSERT INTO Taxa_Poznamky (TaxonID, REMARKS) VALUES (" & q & " & newID & " & q & ", '" & q & " & sRem & " & q & "')" & q & ", 128" & vbCrLf
+    vba = vba & "        nImp = nImp + 1: log = log & taxon & Chr(10)" & vbCrLf
+    vba = vba & "        NextXlsxRow: rs.MoveNext" & vbCrLf
+    vba = vba & "    Loop" & vbCrLf
+    vba = vba & "    rs.Close: cn.Close" & vbCrLf
+    vba = vba & "    Me!lblXlsxStatus.Caption = " & q & "Done: " & q & " & nImp & " & q & " imported, " & q & " & nSkip & " & q & " skipped." & q & vbCrLf
+    vba = vba & "    Me!txtXlsxLog.Value = log" & vbCrLf
+    vba = vba & "    MsgBox " & q & "Import complete: " & q & " & nImp & " & q & " new taxa added." & q & " & IIf(nSkip > 0, Chr(10) & nSkip & " & q & " skipped (duplicates)." & q & ", " & q & q & "), vbInformation" & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "XlsxErr: MsgBox " & q & "Import error: " & q & " & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "    On Error Resume Next: rs.Close: cn.Close" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnCloseXlsx_Click(): DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tX As String: tX = f.Name
+    DoCmd.Close acForm, tX, acSaveYes
+    DoCmd.CopyObject , "frmImportXlsx", acForm, tX
+    DoCmd.DeleteObject acForm, tX
+End Sub
+
+Private Sub CreateExportDocxForm()
+    On Error Resume Next
+    DoCmd.DeleteObject acForm, "frmExportDocx"
+    On Error GoTo 0
+    Dim f As Form: Set f = CreateForm
+    Dim fn As String: fn = f.Name
+    With f
+        .Caption = "Export taxon to DOCX": .Width = 13000: .PopUp = True: .Modal = False
+        .ScrollBars = 0: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 2
+        .Section(acDetail).BackColor = &H202020: .Section(acDetail).Height = 9000
+    End With
+    Dim c As Control
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 12000, 600)
+    c.Caption = "Export taxon to DOCX": c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 14: c.FontBold = True
+    ' Select taxon
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 1000, 3000, 400)
+    c.Caption = "TaxonID (empty = current):": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 3300, 970, 1500, 500)
+    c.Name = "txtTaxonID": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 11
+    ' Target folder
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 1700, 2000, 400)
+    c.Caption = "Target folder:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 200, 2180, 9200, 500)
+    c.Name = "txtFolder": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 10
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 9600, 2150, 3000, 560)
+    c.Name = "btnBrowse": c.Caption = "BROWSE...": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.OnClick = "[Event Procedure]"
+    ' Section checkboxes
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 3000, 12000, 400)
+    c.Caption = "Include sections:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+    Dim sects(5) As String, sectNames(5) As String
+    sects(0) = "chkSecTax": sectNames(0) = "Taxonomie (Rank, Genus, Family...)"
+    sects(1) = "chkSecDesc": sectNames(1) = "Description & Diagnosis"
+    sects(2) = "chkSecOcc": sectNames(2) = "Occurrence (Geography, Stratigraphy, Locality)"
+    sects(3) = "chkSecMat": sectNames(3) = "Type Material & Material Examined"
+    sects(4) = "chkSecSyn": sectNames(4) = "Synonymy"
+    sects(5) = "chkSecRef": sectNames(5) = "References"
+    Dim si As Integer
+    For si = 0 To 5
+        Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 3500 + si * 480, 300, 300)
+        c.Name = sects(si): c.DefaultValue = "-1"
+        Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 3480 + si * 480, 8000, 400)
+        c.Caption = sectNames(si): c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Next si
+    ' Buttons
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 200, 6500, 2200, 600)
+    c.Name = "btnExport": c.Caption = "GENERATE DOCX": c.BackColor = &H228844: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 2600, 6500, 1500, 600)
+    c.Name = "btnClose": c.Caption = "CLOSE": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 7400, 12400, 400)
+    c.Name = "lblStatus": c.Caption = "Requires Microsoft Word installed on this computer.": c.ForeColor = &H888888: c.BackStyle = 0: c.FontSize = 9
+    Dim q As String: q = Chr(34)
+    Dim vba As String
+    vba = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnBrowse_Click()" & vbCrLf
+    vba = vba & "    Dim fd As Object: Set fd = Application.FileDialog(4)" & vbCrLf
+    vba = vba & "    fd.Title = " & q & "Select folder" & q & vbCrLf
+    vba = vba & "    If fd.Show Then Me!txtFolder.Value = fd.SelectedItems(1)" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnExport_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo ExpErr" & vbCrLf
+    vba = vba & "    Dim tID As Long" & vbCrLf
+    vba = vba & "    If Len(Nz(Me!txtTaxonID.Value, " & q & q & ")) > 0 Then" & vbCrLf
+    vba = vba & "        tID = CLng(Me!txtTaxonID.Value)" & vbCrLf
+    vba = vba & "    Else" & vbCrLf
+    vba = vba & "        tID = Nz(TempVars(" & q & "DetailTaxonID" & q & "), 0)" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    If tID = 0 Then MsgBox " & q & "Enter TaxonID." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim folder As String: folder = Nz(Me!txtFolder.Value, CurrentProject.Path)" & vbCrLf
+    vba = vba & "    If Right(folder, 1) <> " & q & "\" & q & " Then folder = folder & " & q & "\" & q & vbCrLf
+    vba = vba & "    Me!lblStatus.Caption = " & q & "Loading data..." & q & ": DoEvents" & vbCrLf
+    vba = vba & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset" & vbCrLf
+    vba = vba & "    ' Load base data" & vbCrLf
+    vba = vba & "    Set rs = db.OpenRecordset(" & q & "SELECT * FROM Taxa WHERE ID=" & q & " & tID)" & vbCrLf
+    vba = vba & "    If rs.EOF Then MsgBox " & q & "TaxonID not found." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim taxon As String: taxon = Nz(rs!TAXON, " & q & "Unknown" & q & ")" & vbCrLf
+    vba = vba & "    Dim author As String: author = Nz(rs!AUTHOR, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim rank As String: rank = Nz(rs!Rank, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim genus As String: genus = Nz(rs!Genus, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim family As String: family = Nz(rs!Family, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim order_ As String: order_ = Nz(rs![Order], " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim class_ As String: class_ = Nz(rs![Class], " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim phylum As String: phylum = Nz(rs!Phylum, " & q & q & ")" & vbCrLf
+    vba = vba & "    rs.Close" & vbCrLf
+    vba = vba & "    ' Load related tables" & vbCrLf
+    vba = vba & "    Dim desc As String, diagn As String, remarks As String" & vbCrLf
+    vba = vba & "    Dim synon As String, typeMat As String, matEx As String, refs As String" & vbCrLf
+    vba = vba & "    Dim geog As String, strat As String, local_ As String, occur As String" & vbCrLf
+    vba = vba & "    Set rs = db.OpenRecordset(" & q & "SELECT * FROM Taxa_Popis WHERE TaxonID=" & q & " & tID)" & vbCrLf
+    vba = vba & "    If Not rs.EOF Then desc = Nz(rs!DESCRIPTION," & q & q & "): diagn = Nz(rs!DIAGNOSIS," & q & q & ")" & vbCrLf
+    vba = vba & "    rs.Close" & vbCrLf
+    vba = vba & "    Set rs = db.OpenRecordset(" & q & "SELECT * FROM Taxa_Material WHERE TaxonID=" & q & " & tID)" & vbCrLf
+    vba = vba & "    If Not rs.EOF Then synon = Nz(rs!SYNONYMY," & q & q & "): typeMat = Nz(rs![TYPE MATERIAL]," & q & q & "): matEx = Nz(rs![MATERIAL EXAMINED]," & q & q & ")" & vbCrLf
+    vba = vba & "    rs.Close" & vbCrLf
+    vba = vba & "    Set rs = db.OpenRecordset(" & q & "SELECT * FROM Taxa_Vyskyt WHERE TaxonID=" & q & " & tID)" & vbCrLf
+    vba = vba & "    If Not rs.EOF Then geog = Nz(rs!Geography," & q & q & "): strat = Nz(rs!STRATIGRAPHY," & q & q & "): local_ = Nz(rs!Locality," & q & q & "): occur = Nz(rs!OCCURRENCE," & q & q & ")" & vbCrLf
+    vba = vba & "    rs.Close" & vbCrLf
+    vba = vba & "    Set rs = db.OpenRecordset(" & q & "SELECT * FROM Taxa_Poznamky WHERE TaxonID=" & q & " & tID)" & vbCrLf
+    vba = vba & "    If Not rs.EOF Then remarks = Nz(rs!REMARKS," & q & q & "): refs = Nz(rs!Reference," & q & q & ")" & vbCrLf
+    vba = vba & "    rs.Close" & vbCrLf
+    vba = vba & "    ' Open Word and build document" & vbCrLf
+    vba = vba & "    Me!lblStatus.Caption = " & q & "Starting Word..." & q & ": DoEvents" & vbCrLf
+    vba = vba & "    Dim wApp As Object: Set wApp = CreateObject(" & q & "Word.Application" & q & ")" & vbCrLf
+    vba = vba & "    wApp.Visible = False" & vbCrLf
+    vba = vba & "    Dim wDoc As Object: Set wDoc = wApp.Documents.Add" & vbCrLf
+    vba = vba & "    Dim wSel As Object: Set wSel = wApp.Selection" & vbCrLf
+    vba = vba & "    ' Set styles" & vbCrLf
+    vba = vba & "    wDoc.PageSetup.TopMargin = wApp.CentimetersToPoints(2.5)" & vbCrLf
+    vba = vba & "    wDoc.PageSetup.BottomMargin = wApp.CentimetersToPoints(2.5)" & vbCrLf
+    vba = vba & "    wDoc.PageSetup.LeftMargin = wApp.CentimetersToPoints(3)" & vbCrLf
+    vba = vba & "    wDoc.PageSetup.RightMargin = wApp.CentimetersToPoints(2)" & vbCrLf
+    vba = vba & "    ' Main heading - taxon in italics, author normal" & vbCrLf
+    vba = vba & "    Dim para As Object: Set para = wDoc.Content.Paragraphs.Add" & vbCrLf
+    vba = vba & "    With wSel" & vbCrLf
+    vba = vba & "        .Font.Bold = True: .Font.Size = 14: .Font.Italic = True" & vbCrLf
+    vba = vba & "        .TypeText taxon" & vbCrLf
+    vba = vba & "        .Font.Italic = False" & vbCrLf
+    vba = vba & "        If author <> " & q & q & " Then .TypeText " & q & " " & q & " & author" & vbCrLf
+    vba = vba & "        .Font.Bold = False: .Font.Size = 12" & vbCrLf
+    vba = vba & "        .TypeParagraph" & vbCrLf
+    vba = vba & "    End With" & vbCrLf
+    ' Helper macro for writing section
+    vba = vba & "    ' Helper - section" & vbCrLf
+    vba = vba & "    Dim wRange As Object" & vbCrLf
+    vba = vba & "    " & vbCrLf
+    vba = vba & "    If Me!chkSecTax Then" & vbCrLf
+    vba = vba & "        wSel.Font.Bold = True: wSel.Font.Size = 11: wSel.Font.Italic = False" & vbCrLf
+    vba = vba & "        wSel.TypeText " & q & "Classification" & q & ": wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        wSel.Font.Bold = False: wSel.Font.Size = 11" & vbCrLf
+    vba = vba & "        If rank <> " & q & q & " Then wSel.TypeText " & q & "Rank: " & q & " & rank: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        If phylum <> " & q & q & " Then wSel.TypeText " & q & "Phylum: " & q & " & phylum: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        If class_ <> " & q & q & " Then wSel.TypeText " & q & "Class: " & q & " & class_: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        If order_ <> " & q & q & " Then wSel.TypeText " & q & "Order: " & q & " & order_: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        If family <> " & q & q & " Then wSel.TypeText " & q & "Family: " & q & " & family: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        If genus <> " & q & q & " Then wSel.TypeText " & q & "Genus: " & q & " & genus: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        wSel.TypeParagraph" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    If Me!chkSecSyn And synon <> " & q & q & " Then" & vbCrLf
+    vba = vba & "        wSel.Font.Bold = True: wSel.TypeText " & q & "Synonymy" & q & ": wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        wSel.Font.Bold = False: wSel.TypeText synon: wSel.TypeParagraph: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    If Me!chkSecDesc Then" & vbCrLf
+    vba = vba & "        If desc <> " & q & q & " Then: wSel.Font.Bold = True: wSel.TypeText " & q & "Description" & q & ": wSel.TypeParagraph: wSel.Font.Bold = False: wSel.TypeText desc: wSel.TypeParagraph: wSel.TypeParagraph: End If" & vbCrLf
+    vba = vba & "        If diagn <> " & q & q & " Then: wSel.Font.Bold = True: wSel.TypeText " & q & "Diagnosis" & q & ": wSel.TypeParagraph: wSel.Font.Bold = False: wSel.TypeText diagn: wSel.TypeParagraph: wSel.TypeParagraph: End If" & vbCrLf
+    vba = vba & "        If remarks <> " & q & q & " Then: wSel.Font.Bold = True: wSel.TypeText " & q & "Remarks" & q & ": wSel.TypeParagraph: wSel.Font.Bold = False: wSel.TypeText remarks: wSel.TypeParagraph: wSel.TypeParagraph: End If" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    If Me!chkSecOcc Then" & vbCrLf
+    vba = vba & "        wSel.Font.Bold = True: wSel.TypeText " & q & "Occurrence" & q & ": wSel.TypeParagraph: wSel.Font.Bold = False" & vbCrLf
+    vba = vba & "        If occur <> " & q & q & " Then wSel.TypeText occur: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        If geog <> " & q & q & " Then wSel.TypeText " & q & "Geography: " & q & " & geog: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        If strat <> " & q & q & " Then wSel.TypeText " & q & "Stratigraphy: " & q & " & strat: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        If local_ <> " & q & q & " Then wSel.TypeText " & q & "Locality: " & q & " & local_: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        wSel.TypeParagraph" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    If Me!chkSecMat Then" & vbCrLf
+    vba = vba & "        If typeMat <> " & q & q & " Then: wSel.Font.Bold = True: wSel.TypeText " & q & "Type Material" & q & ": wSel.TypeParagraph: wSel.Font.Bold = False: wSel.TypeText typeMat: wSel.TypeParagraph: wSel.TypeParagraph: End If" & vbCrLf
+    vba = vba & "        If matEx <> " & q & q & " Then: wSel.Font.Bold = True: wSel.TypeText " & q & "Material Examined" & q & ": wSel.TypeParagraph: wSel.Font.Bold = False: wSel.TypeText matEx: wSel.TypeParagraph: wSel.TypeParagraph: End If" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    If Me!chkSecRef And refs <> " & q & q & " Then" & vbCrLf
+    vba = vba & "        wSel.Font.Bold = True: wSel.TypeText " & q & "References" & q & ": wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        wSel.Font.Bold = False: wSel.TypeText refs: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    ' Save file" & vbCrLf
+    vba = vba & "    Dim safeName As String: safeName = taxon" & vbCrLf
+    vba = vba & "    Dim ic As Integer" & vbCrLf
+    vba = vba & "    Dim badChars As String: badChars = " & q & "\/:*?<>|" & q & q & vbCrLf
+    vba = vba & "    Dim ic As Integer" & vbCrLf
+    vba = vba & "    For ic = 1 To Len(badChars)" & vbCrLf
+    vba = vba & "        safeName = Replace(safeName, Mid(badChars, ic, 1), " & q & "_" & q & ")" & vbCrLf
+    vba = vba & "    Next ic" & vbCrLf
+    vba = vba & "    Dim filePath As String: filePath = folder & safeName & " & q & "_" & q & " & tID & " & q & ".docx" & q & vbCrLf
+    vba = vba & "    wDoc.SaveAs2 filePath, 16  ' 16 = wdFormatXMLDocument" & vbCrLf
+    vba = vba & "    wDoc.Close False: wApp.Quit" & vbCrLf
+    vba = vba & "    Me!lblStatus.Caption = " & q & "Saved: " & q & " & filePath" & vbCrLf
+    vba = vba & "    If MsgBox(" & q & "DOCX created. Open it?" & q & ", vbYesNo) = vbYes Then Shell " & q & "explorer " & q & " & filePath" & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "ExpErr: On Error Resume Next: wApp.Quit: MsgBox " & q & "Error: " & q & " & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf & _
+        "    If KeyCode = 27 Then DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf & _
+        "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnClose_Click(): DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tE As String: tE = f.Name
+    DoCmd.Close acForm, tE, acSaveYes
+    DoCmd.CopyObject , "frmExportDocx", acForm, tE
+    DoCmd.DeleteObject acForm, tE
+End Sub
+
+Private Sub CreateBatchDocxForm()
+    On Error Resume Next: DoCmd.DeleteObject acForm, "frmBatchDocx": On Error GoTo 0
+    Dim f As Form: Set f = CreateForm: Dim fn As String: fn = f.Name
+    With f
+        .Caption = "Batch Export to DOCX": .Width = 14000: .PopUp = True: .Modal = False
+        .ScrollBars = 0: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 2
+        .Section(acDetail).BackColor = &H202020: .Section(acDetail).Height = 10000
+    End With
+    Dim c As Control
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 13000, 600)
+    c.Caption = "BATCH EXPORT TO DOCX": c.ForeColor = &H228844: c.BackStyle = 0: c.FontSize = 14: c.FontBold = True
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 950, 3000, 400)
+    c.Caption = "Records to export:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 3400, 950, 5000, 400)
+    c.Name = "lblRecordCount": c.Caption = "(loading...)": c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 1600, 2000, 400)
+    c.Caption = "Target folder:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 200, 2080, 9800, 500)
+    c.Name = "txtFolder": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 10
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 10200, 2050, 3500, 560)
+    c.Name = "btnBrowse": c.Caption = "BROWSE...": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.FontSize = 10: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 2900, 2500, 400)
+    c.Caption = "Output mode:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acComboBox, acDetail, "", "", 2800, 2870, 4000, 500)
+    c.Name = "cboMode": c.RowSourceType = "Value List"
+    c.RowSource = """One file per taxon"";""Single combined document"""
+    c.DefaultValue = """One file per taxon""": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.BorderColor = &H444444: c.FontSize = 10: c.LimitToList = True
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 3600, 3000, 400)
+    c.Caption = "Include sections:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+
+    Dim sects(5) As String, sectLbls(5) As String
+    sects(0) = "chkTax": sectLbls(0) = "Classification (Rank, Family, Order...)"
+    sects(1) = "chkDesc": sectLbls(1) = "Description & Diagnosis"
+    sects(2) = "chkOcc": sectLbls(2) = "Occurrence (Geography, Stratigraphy, Locality)"
+    sects(3) = "chkMat": sectLbls(3) = "Type Material & Material Examined"
+    sects(4) = "chkSyn": sectLbls(4) = "Synonymy"
+    sects(5) = "chkRef": sectLbls(5) = "References"
+    Dim si As Integer
+    For si = 0 To 5
+        Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 4100 + si * 450, 300, 300)
+        c.Name = sects(si): c.DefaultValue = "-1"
+        Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 4080 + si * 450, 8000, 400)
+        c.Caption = sectLbls(si): c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Next si
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 200, 6900, 2500, 600)
+    c.Name = "btnExport": c.Caption = "START EXPORT": c.BackColor = &H228844: c.ForeColor = &HFFFFFF
+    c.FontSize = 11: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 2900, 6900, 1500, 600)
+    c.Name = "btnClose": c.Caption = "CLOSE": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 7800, 13400, 400)
+    c.Name = "lblStatus": c.Caption = "": c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 200, 8400, 13400, 1400)
+    c.Name = "txtLog": c.Locked = True: c.BackColor = &H1A1A1A
+    c.ForeColor = &H888888: c.FontSize = 9: c.BorderColor = &H333333
+
+    Dim q As String: q = Chr(34)
+    Dim vba As String
+    vba = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+    vba = vba & "Private g_IDs() As Long" & vbCrLf & "Private g_Count As Long" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub Form_Load()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Dim wh As String: wh = Nz(TempVars(" & q & "BatchDocxFilter" & q & "), " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim sql As String" & vbCrLf
+    vba = vba & "    If wh <> " & q & q & " Then sql = " & q & "SELECT ID FROM Taxa WHERE " & q & " & wh & " & q & " ORDER BY TAXON" & q & vbCrLf
+    vba = vba & "    If wh = " & q & q & " Then sql = " & q & "SELECT ID FROM Taxa ORDER BY TAXON" & q & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset: Set rs = CurrentDb.OpenRecordset(sql)" & vbCrLf
+    vba = vba & "    g_Count = 0: ReDim g_IDs(0 To 5000)" & vbCrLf
+    vba = vba & "    Do While Not rs.EOF: g_IDs(g_Count) = rs!ID: g_Count = g_Count + 1: rs.MoveNext: Loop: rs.Close" & vbCrLf
+    vba = vba & "    Me!lblRecordCount.Caption = g_Count & " & q & " taxa selected" & q & vbCrLf
+    vba = vba & "    Me!txtFolder.Value = CurrentProject.Path & " & q & "\Export\" & q & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnBrowse_Click()" & vbCrLf
+    vba = vba & "    Dim fd As Object: Set fd = Application.FileDialog(4)" & vbCrLf
+    vba = vba & "    fd.Title = " & q & "Select target folder" & q & vbCrLf
+    vba = vba & "    If fd.Show Then Me!txtFolder.Value = fd.SelectedItems(1)" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnExport_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo ExpErr" & vbCrLf
+    vba = vba & "    If g_Count = 0 Then MsgBox " & q & "No records to export." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim folder As String: folder = Nz(Me!txtFolder.Value, CurrentProject.Path)" & vbCrLf
+    vba = vba & "    If Right(folder, 1) <> " & q & "\" & q & " Then folder = folder & " & q & "\" & q & vbCrLf
+    vba = vba & "    If Dir(folder, vbDirectory) = " & q & q & " Then MkDir folder" & vbCrLf
+    vba = vba & "    Dim combined As Boolean: combined = (Me!cboMode.Value = " & q & "Single combined document" & q & ")" & vbCrLf
+    vba = vba & "    Me!lblStatus.Caption = " & q & "Starting Word..." & q & ": DoEvents" & vbCrLf
+    vba = vba & "    Dim wApp As Object: Set wApp = CreateObject(" & q & "Word.Application" & q & ")" & vbCrLf
+    vba = vba & "    wApp.Visible = False" & vbCrLf
+    vba = vba & "    Dim wDoc As Object" & vbCrLf
+    vba = vba & "    If combined Then Set wDoc = wApp.Documents.Add" & vbCrLf
+    vba = vba & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    vba = vba & "    Dim log As String: log = " & q & q & vbCrLf
+    vba = vba & "    Dim i As Long" & vbCrLf
+    vba = vba & "    For i = 0 To g_Count - 1" & vbCrLf
+    vba = vba & "        Dim tID As Long: tID = g_IDs(i)" & vbCrLf
+    vba = vba & "        Me!lblStatus.Caption = " & q & "Exporting " & q & " & (i+1) & " & q & " / " & q & " & g_Count: DoEvents" & vbCrLf
+    vba = vba & "        If Not combined Then Set wDoc = wApp.Documents.Add" & vbCrLf
+    vba = vba & "        Dim rs As DAO.Recordset" & vbCrLf
+    vba = vba & "        Set rs = db.OpenRecordset(" & q & "SELECT t.*, p.DESCRIPTION, p.DIAGNOSIS, p.APERTURE, p.[CROSS-SECTION], p.OPERCULUM, p.SCULPTURE, p.CLAVICLES, p.CARDINAL_PROCESSES, m.SYNONYMY, m.[TYPE MATERIAL], m.[MATERIAL EXAMINED], m.FIGURES, v.Geography, v.STRATIGRAPHY, v.Locality, v.OCCURRENCE, v.System, v.Formation, v.Member, v.Stage, v.Serie, v.Zone, v.Horizon, z.REMARKS, z.Reference FROM Taxa t LEFT JOIN Taxa_Popis p ON t.ID=p.TaxonID LEFT JOIN Taxa_Material m ON t.ID=m.TaxonID LEFT JOIN Taxa_Vyskyt v ON t.ID=v.TaxonID LEFT JOIN Taxa_Poznamky z ON t.ID=z.TaxonID WHERE t.ID=" & q & " & tID)" & vbCrLf
+    vba = vba & "        If rs.EOF Then rs.Close: GoTo NextTaxon" & vbCrLf
+    vba = vba & "        Dim taxon As String: taxon = Nz(rs!TAXON, " & q & "Unknown" & q & ")" & vbCrLf
+    vba = vba & "        Dim author As String: author = Nz(rs!AUTHOR, " & q & q & ")" & vbCrLf
+    ' Write to Word
+    vba = vba & "        Dim wSel As Object: Set wSel = wApp.Selection" & vbCrLf
+    vba = vba & "        If combined And i > 0 Then wSel.InsertBreak 7  ' wdPageBreak=7" & vbCrLf
+    vba = vba & "        wSel.Font.Bold = True: wSel.Font.Size = 14: wSel.Font.Italic = True" & vbCrLf
+    vba = vba & "        wSel.TypeText taxon: wSel.Font.Italic = False" & vbCrLf
+    vba = vba & "        If author <> " & q & q & " Then wSel.TypeText " & q & " " & q & " & author" & vbCrLf
+    vba = vba & "        wSel.Font.Bold = False: wSel.Font.Size = 11: wSel.TypeParagraph" & vbCrLf
+    ' Classification
+    vba = vba & "        If Me!chkTax Then" & vbCrLf
+    vba = vba & "            wSel.Font.Bold = True: wSel.TypeText " & q & "Classification" & q & ": wSel.TypeParagraph: wSel.Font.Bold = False" & vbCrLf
+    vba = vba & "            Dim flds(6) As String: flds(0)=" & q & "Rank" & q & ": flds(1)=" & q & "Phylum" & q & ": flds(2)=" & q & "Class" & q & ": flds(3)=" & q & "Order" & q & ": flds(4)=" & q & "Family" & q & ": flds(5)=" & q & "Genus" & q & ": flds(6)=" & q & "Species" & q & vbCrLf
+    vba = vba & "            Dim fi As Integer: For fi = 0 To 6: If Nz(rs.Fields(flds(fi))," & q & q & ") <> " & q & q & " Then wSel.TypeText flds(fi) & " & q & ": " & q & " & rs.Fields(flds(fi)): wSel.TypeParagraph: End If: Next fi" & vbCrLf
+    vba = vba & "            wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    ' Synonymy
+    vba = vba & "        If Me!chkSyn And Nz(rs!SYNONYMY," & q & q & ") <> " & q & q & " Then" & vbCrLf
+    vba = vba & "            wSel.Font.Bold = True: wSel.TypeText " & q & "Synonymy" & q & ": wSel.TypeParagraph: wSel.Font.Bold = False: wSel.TypeText CStr(rs!SYNONYMY): wSel.TypeParagraph: wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    ' Description / Diagnosis / Remarks
+    vba = vba & "        If Me!chkDesc Then" & vbCrLf
+    vba = vba & "            If Nz(rs!DESCRIPTION," & q & q & ") <> " & q & q & " Then: wSel.Font.Bold=True: wSel.TypeText " & q & "Description" & q & ": wSel.TypeParagraph: wSel.Font.Bold=False: wSel.TypeText CStr(rs!DESCRIPTION): wSel.TypeParagraph: wSel.TypeParagraph: End If" & vbCrLf
+    vba = vba & "            If Nz(rs!DIAGNOSIS," & q & q & ") <> " & q & q & " Then: wSel.Font.Bold=True: wSel.TypeText " & q & "Diagnosis" & q & ": wSel.TypeParagraph: wSel.Font.Bold=False: wSel.TypeText CStr(rs!DIAGNOSIS): wSel.TypeParagraph: wSel.TypeParagraph: End If" & vbCrLf
+    vba = vba & "            If Nz(rs!REMARKS," & q & q & ") <> " & q & q & " Then: wSel.Font.Bold=True: wSel.TypeText " & q & "Remarks" & q & ": wSel.TypeParagraph: wSel.Font.Bold=False: wSel.TypeText CStr(rs!REMARKS): wSel.TypeParagraph: wSel.TypeParagraph: End If" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    ' Occurrence
+    vba = vba & "        If Me!chkOcc Then" & vbCrLf
+    vba = vba & "            wSel.Font.Bold = True: wSel.TypeText " & q & "Occurrence" & q & ": wSel.TypeParagraph: wSel.Font.Bold = False" & vbCrLf
+    vba = vba & "            If Nz(rs!OCCURRENCE," & q & q & ") <> " & q & q & " Then wSel.TypeText CStr(rs!OCCURRENCE): wSel.TypeParagraph" & vbCrLf
+    vba = vba & "            If Nz(rs!Geography," & q & q & ") <> " & q & q & " Then wSel.TypeText " & q & "Geography: " & q & " & CStr(rs!Geography): wSel.TypeParagraph" & vbCrLf
+    vba = vba & "            If Nz(rs!STRATIGRAPHY," & q & q & ") <> " & q & q & " Then wSel.TypeText " & q & "Stratigraphy: " & q & " & CStr(rs!STRATIGRAPHY): wSel.TypeParagraph" & vbCrLf
+    vba = vba & "            If Nz(rs!Locality," & q & q & ") <> " & q & q & " Then wSel.TypeText " & q & "Locality: " & q & " & CStr(rs!Locality): wSel.TypeParagraph" & vbCrLf
+    vba = vba & "            wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    ' Material
+    vba = vba & "        If Me!chkMat Then" & vbCrLf
+    vba = vba & "            If Nz(rs![TYPE MATERIAL]," & q & q & ") <> " & q & q & " Then: wSel.Font.Bold=True: wSel.TypeText " & q & "Type Material" & q & ": wSel.TypeParagraph: wSel.Font.Bold=False: wSel.TypeText CStr(rs![TYPE MATERIAL]): wSel.TypeParagraph: wSel.TypeParagraph: End If" & vbCrLf
+    vba = vba & "            If Nz(rs![MATERIAL EXAMINED]," & q & q & ") <> " & q & q & " Then: wSel.Font.Bold=True: wSel.TypeText " & q & "Material Examined" & q & ": wSel.TypeParagraph: wSel.Font.Bold=False: wSel.TypeText CStr(rs![MATERIAL EXAMINED]): wSel.TypeParagraph: wSel.TypeParagraph: End If" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    ' References
+    vba = vba & "        If Me!chkRef And Nz(rs!Reference," & q & q & ") <> " & q & q & " Then" & vbCrLf
+    vba = vba & "            wSel.Font.Bold=True: wSel.TypeText " & q & "References" & q & ": wSel.TypeParagraph: wSel.Font.Bold=False: wSel.TypeText CStr(rs!Reference): wSel.TypeParagraph" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    vba = vba & "        rs.Close" & vbCrLf
+    ' Save individual file
+    vba = vba & "        If Not combined Then" & vbCrLf
+    vba = vba & "            Dim safeName As String: safeName = taxon" & vbCrLf
+    vba = vba & "            Dim ic As Integer: For ic = 1 To Len(" & q & "\/:*?<>|" & q & "): safeName = Replace(safeName, Mid(" & q & "\/:*?<>|" & q & ", ic, 1), " & q & "_" & q & "): Next ic" & vbCrLf
+    vba = vba & "            Dim fPath As String: fPath = folder & safeName & " & q & "_" & q & " & tID & " & q & ".docx" & q & vbCrLf
+    vba = vba & "            wDoc.SaveAs2 fPath, 16: wDoc.Close False" & vbCrLf
+    vba = vba & "            log = log & taxon & " & q & " -> " & q & " & fPath & Chr(10)" & vbCrLf
+    vba = vba & "        Else" & vbCrLf
+    vba = vba & "            log = log & taxon & Chr(10)" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    vba = vba & "        NextTaxon:" & vbCrLf
+    vba = vba & "    Next i" & vbCrLf
+    ' Save combined file
+    vba = vba & "    If combined Then" & vbCrLf
+    vba = vba & "        Dim stamp As String: stamp = Format(Now(), " & q & "yyyymmdd_hhnnss" & q & ")" & vbCrLf
+    vba = vba & "        Dim combPath As String: combPath = folder & " & q & "Hyolitha_export_" & q & " & stamp & " & q & ".docx" & q & vbCrLf
+    vba = vba & "        wDoc.SaveAs2 combPath, 16: wDoc.Close False" & vbCrLf
+    vba = vba & "        log = " & q & "Saved: " & q & " & combPath & Chr(10) & Chr(10) & log" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    wApp.Quit" & vbCrLf
+    vba = vba & "    Me!txtLog.Value = log" & vbCrLf
+    vba = vba & "    Me!lblStatus.Caption = " & q & "Done: " & q & " & g_Count & " & q & " taxa exported." & q & vbCrLf
+    vba = vba & "    MsgBox " & q & "Export complete: " & q & " & g_Count & " & q & " taxa." & q & ", vbInformation" & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "ExpErr: On Error Resume Next: wApp.Quit: MsgBox " & q & "Export error: " & q & " & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf & _
+        "    If KeyCode = 27 Then DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf & _
+        "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnClose_Click(): DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tB As String: tB = f.Name
+    DoCmd.Close acForm, tB, acSaveYes
+    DoCmd.CopyObject , "frmBatchDocx", acForm, tB
+    DoCmd.DeleteObject acForm, tB
+End Sub
+
+Private Sub CreateBibTexForm()
+    On Error Resume Next: DoCmd.DeleteObject acForm, "frmBibTexExport": On Error GoTo 0
+    Dim f As Form: Set f = CreateForm: Dim fn As String: fn = f.Name
+    With f
+        .Caption = "Export References: BibTeX / RIS": .Width = 13000: .PopUp = True: .Modal = False
+        .ScrollBars = 0: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 2
+        .Section(acDetail).BackColor = &H202020: .Section(acDetail).Height = 10500
+    End With
+    Dim c As Control
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 12000, 600)
+    c.Caption = "EXPORT REFERENCES": c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 14: c.FontBold = True
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 950, 2000, 400)
+    c.Caption = "Format:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acComboBox, acDetail, "", "", 2300, 920, 4000, 500)
+    c.Name = "cboFormat": c.RowSourceType = "Value List"
+    c.RowSource = """BibTeX (.bib)"";""RIS (.ris)"";""Plain text"""
+    c.DefaultValue = """BibTeX (.bib)""": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.BorderColor = &H444444: c.FontSize = 11: c.LimitToList = True
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 1650, 2000, 400)
+    c.Caption = "Scope:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acComboBox, acDetail, "", "", 2300, 1620, 5000, 500)
+    c.Name = "cboScope": c.RowSourceType = "Value List"
+    c.RowSource = """Current filter (all visible)"";""Selected taxon (current)"";""All taxa"""
+    c.DefaultValue = """Current filter (all visible)""": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.BorderColor = &H444444: c.FontSize = 11: c.LimitToList = True
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 2350, 2000, 400)
+    c.Caption = "BibTeX type:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acComboBox, acDetail, "", "", 2300, 2320, 4000, 500)
+    c.Name = "cboBibType": c.RowSourceType = "Value List"
+    c.RowSource = """@article"";""@incollection"";""@book"";""@misc"""
+    c.DefaultValue = """@article""": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.BorderColor = &H444444: c.FontSize = 11: c.LimitToList = True
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 3050, 2000, 400)
+    c.Caption = "Output file:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 2300, 3020, 8000, 500)
+    c.Name = "txtOutputFile": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 10
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 10500, 2990, 2200, 560)
+    c.Name = "btnBrowseBib": c.Caption = "BROWSE...": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.FontSize = 10: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 200, 4000, 2500, 600)
+    c.Name = "btnPreviewBib": c.Caption = "PREVIEW": c.BackColor = &H5580: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 2900, 4000, 2000, 600)
+    c.Name = "btnExportBib": c.Caption = "EXPORT": c.BackColor = &HFF8C00: c.ForeColor = &H0
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 5100, 4000, 1500, 600)
+    c.Name = "btnClose": c.Caption = "CLOSE": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 200, 4900, 12500, 5400)
+    c.Name = "txtPreview": c.Locked = True: c.BackColor = &H1A1A1A
+    c.ForeColor = &HCC66: c.FontSize = 9: c.BorderColor = &H333333
+    c.FontName = "Courier New"
+
+    Dim q As String: q = Chr(34)
+    Dim vba As String
+    vba = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Function GetIDs() As String" & vbCrLf
+    vba = vba & "    Dim scope As String: scope = Nz(Me!cboScope.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim sql As String" & vbCrLf
+    vba = vba & "    If InStr(scope, " & q & "Current filter" & q & ") > 0 Then" & vbCrLf
+    vba = vba & "        Dim wh As String: wh = Nz(TempVars(" & q & "BatchDocxFilter" & q & "), " & q & q & ")" & vbCrLf
+    vba = vba & "        sql = " & q & "SELECT ID FROM Taxa" & q & " & IIf(wh <> " & q & q & ", " & q & " WHERE " & q & " & wh, " & q & q & ")" & vbCrLf
+    vba = vba & "    ElseIf InStr(scope, " & q & "Selected taxon" & q & ") > 0 Then" & vbCrLf
+    vba = vba & "        Dim selID As Long: selID = Nz(TempVars(" & q & "BibTexTaxonID" & q & "), 0)" & vbCrLf
+    vba = vba & "        sql = " & q & "SELECT ID FROM Taxa WHERE ID=" & q & " & selID" & vbCrLf
+    vba = vba & "    Else: sql = " & q & "SELECT ID FROM Taxa ORDER BY TAXON" & q & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    GetIDs = sql" & vbCrLf
+    vba = vba & "End Function" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Function FormatBibTeX(rs As DAO.Recordset, bibType As String) As String" & vbCrLf
+    vba = vba & "    Dim taxon As String: taxon = Nz(rs!TAXON, " & q & "Unknown" & q & ")" & vbCrLf
+    vba = vba & "    Dim author As String: author = Nz(rs!AUTHOR, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim refs As String: refs = Nz(rs!Reference, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim tID As Long: tID = Nz(rs!ID, 0)" & vbCrLf
+    ' Generate BibTeX key: first word of taxon + year (extract from author)
+    vba = vba & "    Dim yr As String: yr = " & q & q & vbCrLf
+    vba = vba & "    Dim yrMatch As Object" & vbCrLf
+    vba = vba & "    Dim re As Object: Set re = CreateObject(" & q & "VBScript.RegExp" & q & ")" & vbCrLf
+    vba = vba & "    re.Pattern = " & q & "\d{4}" & q & ": re.Global = False" & vbCrLf
+    vba = vba & "    If re.Test(author) Then yr = re.Execute(author)(0)" & vbCrLf
+    vba = vba & "    Dim key As String: key = Split(taxon, " & q & " " & q & ")(0) & yr" & vbCrLf
+    vba = vba & "    Dim out As String" & vbCrLf
+    vba = vba & "    out = bibType & " & q & "{" & q & " & key & " & q & "," & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    out = out & " & q & "  title     = {" & q & " & taxon & " & q & "}," & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    If author <> " & q & q & " Then out = out & " & q & "  author    = {" & q & " & author & " & q & "}," & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    If yr <> " & q & q & " Then out = out & " & q & "  year      = {" & q & " & yr & " & q & "}," & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    out = out & " & q & "  note      = {Hyolitha DB ID=" & q & " & tID & " & q & "}," & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    If refs <> " & q & q & " Then out = out & " & q & "  annote    = {" & q & " & Left(refs, 300) & " & q & "}," & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    out = out & " & q & "}" & q & " & Chr(10) & Chr(10)" & vbCrLf
+    vba = vba & "    FormatBibTeX = out" & vbCrLf
+    vba = vba & "End Function" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Function FormatRIS(rs As DAO.Recordset) As String" & vbCrLf
+    vba = vba & "    Dim taxon As String: taxon = Nz(rs!TAXON, " & q & "Unknown" & q & ")" & vbCrLf
+    vba = vba & "    Dim author As String: author = Nz(rs!AUTHOR, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim refs As String: refs = Nz(rs!Reference, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim re As Object: Set re = CreateObject(" & q & "VBScript.RegExp" & q & ")" & vbCrLf
+    vba = vba & "    re.Pattern = " & q & "\d{4}" & q & ": re.Global = False" & vbCrLf
+    vba = vba & "    Dim yr As String: yr = IIf(re.Test(author), re.Execute(author)(0), " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim out As String" & vbCrLf
+    vba = vba & "    out = " & q & "TY  - JOUR" & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    out = out & " & q & "TI  - " & q & " & taxon & Chr(10)" & vbCrLf
+    vba = vba & "    If author <> " & q & q & " Then out = out & " & q & "AU  - " & q & " & author & Chr(10)" & vbCrLf
+    vba = vba & "    If yr <> " & q & q & " Then out = out & " & q & "PY  - " & q & " & yr & Chr(10)" & vbCrLf
+    vba = vba & "    out = out & " & q & "N1  - Hyolitha DB ID=" & q & " & rs!ID & Chr(10)" & vbCrLf
+    vba = vba & "    If refs <> " & q & q & " Then out = out & " & q & "N2  - " & q & " & Left(refs, 300) & Chr(10)" & vbCrLf
+    vba = vba & "    out = out & " & q & "ER  - " & q & " & Chr(10) & Chr(10)" & vbCrLf
+    vba = vba & "    FormatRIS = out" & vbCrLf
+    vba = vba & "End Function" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Function BuildOutput() As String" & vbCrLf
+    vba = vba & "    On Error GoTo BibErr" & vbCrLf
+    vba = vba & "    Dim fmt As String: fmt = Nz(Me!cboFormat.Value, " & q & "BibTeX (.bib)" & q & ")" & vbCrLf
+    vba = vba & "    Dim bType As String: bType = Nz(Me!cboBibType.Value, " & q & "@article" & q & ")" & vbCrLf
+    vba = vba & "    Dim sql As String: sql = GetIDs()" & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset: Set rs = CurrentDb.OpenRecordset(" & q & "SELECT t.ID, t.TAXON, t.AUTHOR, z.Reference FROM Taxa t LEFT JOIN Taxa_Poznamky z ON t.ID=z.TaxonID WHERE t.ID IN (" & q & " & Replace(sql, " & q & "SELECT ID FROM Taxa" & q & ", " & q & "SELECT ID FROM Taxa" & q & ") & " & q & ") ORDER BY t.TAXON" & q & ")" & vbCrLf
+    vba = vba & "    Dim out As String: out = " & q & q & vbCrLf
+    vba = vba & "    Do While Not rs.EOF" & vbCrLf
+    vba = vba & "        If InStr(fmt, " & q & "BibTeX" & q & ") > 0 Then out = out & FormatBibTeX(rs, bType)" & vbCrLf
+    vba = vba & "        If InStr(fmt, " & q & "RIS" & q & ") > 0 Then out = out & FormatRIS(rs)" & vbCrLf
+    vba = vba & "        If InStr(fmt, " & q & "Plain" & q & ") > 0 Then out = out & Nz(rs!TAXON," & q & q & ") & " & q & " (" & q & " & Nz(rs!AUTHOR," & q & q & ") & " & q & ")" & q & " & Chr(10) & Nz(rs!Reference," & q & q & ") & Chr(10) & Chr(10)" & vbCrLf
+    vba = vba & "        rs.MoveNext" & vbCrLf
+    vba = vba & "    Loop: rs.Close" & vbCrLf
+    vba = vba & "    BuildOutput = out" & vbCrLf
+    vba = vba & "    Exit Function" & vbCrLf
+    vba = vba & "BibErr: BuildOutput = " & q & "Error: " & q & " & Err.Description" & vbCrLf
+    vba = vba & "End Function" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnPreviewBib_Click()" & vbCrLf
+    vba = vba & "    Me!txtPreview.Value = BuildOutput()" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnExportBib_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo ExpBibErr" & vbCrLf
+    vba = vba & "    Dim out As String: out = BuildOutput()" & vbCrLf
+    vba = vba & "    If Left(out, 5) = " & q & "Error" & q & " Then MsgBox out, vbCritical: Exit Sub" & vbCrLf
+    vba = vba & "    Dim fPath As String: fPath = Nz(Me!txtOutputFile.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    If fPath = " & q & q & " Then" & vbCrLf
+    vba = vba & "        Dim ext As String: ext = IIf(InStr(Me!cboFormat, " & q & "RIS" & q & ") > 0, " & q & ".ris" & q & ", " & q & ".bib" & q & ")" & vbCrLf
+    vba = vba & "        fPath = CurrentProject.Path & " & q & "\References_" & q & " & Format(Now(), " & q & "yyyymmdd_hhnnss" & q & ") & ext" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    Dim fNum As Integer: fNum = FreeFile" & vbCrLf
+    vba = vba & "    Open fPath For Output As #fNum: Print #fNum, out: Close #fNum" & vbCrLf
+    vba = vba & "    Me!txtPreview.Value = out" & vbCrLf
+    vba = vba & "    MsgBox " & q & "Exported to: " & q & " & fPath, vbInformation" & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "ExpBibErr: MsgBox " & q & "Export error: " & q & " & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnBrowseBib_Click()" & vbCrLf
+    vba = vba & "    Dim fd As Object: Set fd = Application.FileDialog(3)" & vbCrLf
+    vba = vba & "    fd.Title = " & q & "Save references as..." & q & ": fd.InitialFileName = " & q & "references.bib" & q & vbCrLf
+    vba = vba & "    If fd.Show Then Me!txtOutputFile.Value = fd.SelectedItems(1)" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf & _
+        "    If KeyCode = 27 Then DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf & _
+        "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnClose_Click(): DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tBib As String: tBib = f.Name
+    DoCmd.Close acForm, tBib, acSaveYes
+    DoCmd.CopyObject , "frmBibTexExport", acForm, tBib
+    DoCmd.DeleteObject acForm, tBib
+End Sub
+
+
+Public Sub BuildForms_3_ImportExport()
+    On Error GoTo Err3
+    Debug.Print "1/5 CreateImportCSVForm..."
+    CreateImportCSVForm
+    Debug.Print "2/5 CreateImportXlsxForm..."
+    CreateImportXlsxForm
+    Debug.Print "3/5 CreateExportDocxForm..."
+    CreateExportDocxForm
+    Debug.Print "4/5 CreateBatchDocxForm..."
+    CreateBatchDocxForm
+    Debug.Print "5/5 CreateBibTexForm..."
+    CreateBibTexForm
+    MsgBox "PACKAGE 3 OK: Import/Export forms created.", vbInformation
+    Exit Sub
+Err3:
+    MsgBox "ERROR in package 3!" & Chr(10) & "Error " & Err.Number & ": " & Err.Description, vbCritical
+End Sub

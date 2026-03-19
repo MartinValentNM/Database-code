@@ -1,0 +1,9 @@
+CREATE TABLE Taxa_History (
+    HistoryID AUTOINCREMENT PRIMARY KEY,
+    TaxonID LONG,
+    TableName TEXT(255),
+    FieldName TEXT(255),
+    OldValue MEMO,
+    ChangeAction TEXT(50),
+    ChangeDate DATETIME
+);

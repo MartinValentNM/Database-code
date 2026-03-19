@@ -1,0 +1,62 @@
+SELECT
+  t.[ID],
+  t.[Compare],
+  t.[TAXON],
+  t.[Genus],
+  t.[Species],
+  t.[AUTHOR],
+  t.[Phylum],
+  t.[Family],
+  t.[Order],
+  t.[Class],
+  t.[Rank],
+
+  tx.[TaxonID]        AS Tx_TaxonID,
+  tx.[TAXONOMIC PLACEMENT],
+  tx.[Taxonomy_path],
+  tx.[TAXON]          AS Tx_Taxon,
+  tx.[TYPE TAXON],
+  tx.[INCLUDED TAXONS],
+
+  tp.[TaxonID]        AS Tp_TaxonID,
+  tp.[ETYMOLOGY],
+  tp.[DESCRIPTION],
+  tp.[SIZE],
+  tp.[DIAGNOSIS],
+  tp.[APERTURE],
+  tp.[CROSS-SECTION],
+  tp.[OPERCULUM],
+  tp.[SCULPTURE],
+  tp.[CLAVICLES],
+  tp.[CARDINAL_PROCESSES],
+
+  tm.[TaxonID]        AS Tm_TaxonID,
+  tm.[TYPE MATERIAL],
+  tm.[MATERIAL EXAMINED],
+  tm.[FIGURES],
+  tm.[SYNONYMY],
+
+  tv.[TaxonID]        AS Tv_TaxonID,
+  tv.[OCCURRENCE],
+  tv.[Geography],
+  tv.[Locality],
+  tv.[STRATIGRAPHY],
+  tv.[System],
+  tv.[Formation],
+  tv.[Member],
+  tv.[Stage],
+  tv.[Serie],
+  tv.[Zone],
+  tv.[Horizon],
+
+  tz.[TaxonID]        AS Tz_TaxonID,
+  tz.[REMARKS],
+  tz.[Reference]
+
+FROM
+  (((([Taxa] AS t
+  LEFT JOIN [Taxa_Taxonomie] AS tx ON t.[ID] = tx.[TaxonID])
+  LEFT JOIN [Taxa_Popis]     AS tp ON t.[ID] = tp.[TaxonID])
+  LEFT JOIN [Taxa_Material]  AS tm ON t.[ID] = tm.[TaxonID])
+  LEFT JOIN [Taxa_Vyskyt]    AS tv ON t.[ID] = tv.[TaxonID])
+  LEFT JOIN [Taxa_Poznamky]  AS tz ON t.[ID] = tz.[TaxonID];

@@ -1,0 +1,1055 @@
+Option Compare Database
+Option Explicit
+
+' ================================================================
+' frmDetailTaxa v83
+' UPDATED: Field names and table assignments aligned with vw_Complete_Taxa SQL
+' Changes from v82:
+'   - OCCURRENCE tab: Czech field names -> English (System, Formation, Member,
+'     Stage, Serie, Zone, Horizon instead of Stupen/Formace/Clen/Zona/Horizont)
+'   - DESCRIPTION tab: Aperture->APERTURE, CROSS_SECTION->CROSS-SECTION,
+'     Sculpture->SCULPTURE, Operculum->OPERCULUM
+'   - Added CLAVICLES and CARDINAL_PROCESSES to DESCRIPTION tab
+'   - MATERIAL tab: added Taxonomy_path; removed Primary_reference_DB
+'   - REMARKS moved from Taxa_Popis to Taxa_Poznamky (correct table)
+'   - SaveField/BackupFieldForUndo: all table routing updated accordingly
+' ================================================================
+
+' --- COLORS ---
+Private Const COL_BG     As Long = &H202020
+Private Const COL_PANEL  As Long = &H2B2B2B
+Private Const COL_TEXT   As Long = &HFFFFFF
+Private Const COL_DIM    As Long = &HC0C0C0
+Private Const COL_BORDER As Long = &H444444
+Private Const COL_LOCKED As Long = &H282828
+
+' --- DIMENSIONS ---
+Private Const FORM_W   As Long = 31000
+Private Const HEADER_H As Long = 2200  ' toolbar height
+Private Const TAB_H    As Long = 15000
+
+' --- GRID ---
+Private Const GRID_START_X   As Long = 400
+Private Const GRID_LBL_W     As Long = 2400
+Private Const GRID_GAP       As Long = 150
+Private Const GRID_TXT_W     As Long = 5500
+Private Const GRID_COL_SPACE As Long = 600
+
+' --- FIELD DEFINITIONS ---
+' Format: Name\isBig\isEdit\height
+' isBig: 1=wide (full width), 0=narrow (3 columns), 2=half (2 columns)
+' isEdit: 1=editable, 0=read-only
+' height: N=normal(600), L=long(3000), R=medium(1800)
+Private Const DEF_TAXONOMY    As String = "TAXONOMIC PLACEMENT\1\0\N" & vbLf & _
+    "Taxonomy_path\1\0\N" & vbLf & _
+    "TAXON\1\1\N" & vbLf & _
+    "Rank\0\0\N" & vbLf & _
+    "AUTHOR\0\1\N" & vbLf & _
+    "Genus\0\1\N" & vbLf & _
+    "Species\0\1\N" & vbLf & _
+    "Family\0\1\N" & vbLf & _
+    "Order\0\1\N" & vbLf & _
+    "Class\0\1\N" & vbLf & _
+    "Phylum\0\1\N" & vbLf & _
+    "TYPE TAXON\0\1\N" & vbLf & _
+    "SYNONYMY\1\1\N" & vbLf & _
+    "INCLUDED TAXONS\1\1\N"
+
+Private Const DEF_DESCRIPTION As String = "DESCRIPTION\1\1\L" & vbLf & _
+    "DIAGNOSIS\1\1\L" & vbLf & _
+    "REMARKS\1\1\R" & vbLf & _
+    "OPERCULUM\0\1\N" & vbLf & _
+    "APERTURE\0\1\N" & vbLf & _
+    "CROSS-SECTION\0\1\N" & vbLf & _
+    "SCULPTURE\0\1\N" & vbLf & _
+    "CLAVICLES\0\1\N" & vbLf & _
+    "CARDINAL_PROCESSES\0\1\N" & vbLf & _
+    "ETYMOLOGY\1\1\N" & vbLf & _
+    "SIZE\0\1\N"
+
+Private Const DEF_OCCURRENCE  As String = "OCCURRENCE\1\1\N" & vbLf & _
+    "Geography\0\1\N" & vbLf & _
+    "STRATIGRAPHY\0\1\N" & vbLf & _
+    "Locality\0\1\N" & vbLf & _
+    "Stage\0\1\N" & vbLf & _
+    "Serie\0\1\N" & vbLf & _
+    "System\0\1\N" & vbLf & _
+    "Formation\0\1\N" & vbLf & _
+    "Member\0\1\N" & vbLf & _
+    "Zone\0\1\N" & vbLf & _
+    "Horizon\0\1\N"
+
+Private Const DEF_MATERIAL    As String = "TYPE MATERIAL\1\1\N" & vbLf & _
+    "MATERIAL EXAMINED\1\1\N" & vbLf & _
+    "FIGURES\0\1\N"
+
+' --- STATE ---
+Private bFormReady       As Boolean
+Private bInCurrentUpdate As Boolean
+
+' ================================================================
+' MAIN GENERATOR
+' ================================================================
+Public Sub CreateDetailFormTaxa_Ultimate()
+    On Error Resume Next
+    DoCmd.Close acForm, "frmDetailTaxa", acSaveNo
+    DoCmd.DeleteObject acForm, "frmDetailTaxa"
+    On Error GoTo 0
+
+    ' STEP 1: Create empty form and save immediately
+    Dim tmp As Form: Set tmp = CreateForm
+    Dim tName As String: tName = tmp.Name
+    DoCmd.Close acForm, tName, acSaveYes
+
+    ' STEP 2: Reopen and add Header via RunCommand
+    DoCmd.OpenForm tName, acDesign
+    DoCmd.RunCommand acCmdFormHdrFtr   ' Toggle: adds Header+Footer
+    DoCmd.Close acForm, tName, acSaveYes
+
+    ' STEP 3: Reopen with Header enabled
+    DoCmd.OpenForm tName, acDesign, , , , acHidden
+    Set tmp = Forms(tName)
+    With tmp
+        .Caption      = "Taxon Manager v83"
+        .RecordSource = "vw_Complete_Taxa"
+        .PopUp        = True
+        .Modal        = True
+        .Width        = FORM_W
+        .Section(acHeader).Height    = HEADER_H
+        .Section(acHeader).BackColor = COL_PANEL
+        .Section(acDetail).BackColor = COL_BG
+        .Section(acDetail).Height    = TAB_H + 400
+        .AutoCenter   = True
+        .KeyPreview   = True
+    End With
+
+    ' 1. Tabs FIRST (lower Z-order)
+    Dim tc As Control
+    Set tc = CreateControl(tName, acTabCtl, acDetail, "", "", 0, 0, FORM_W, TAB_H)
+    tc.Name = "tabMain": tc.UseTheme = False: tc.BackColor = COL_BG
+    tc.ForeColor = COL_TEXT: tc.FontSize = 11: tc.FontBold = True
+    tc.BackStyle = 0
+
+    BuildTabPage tmp, tc, 0, "TAXONOMY",    DEF_TAXONOMY
+    BuildTabPage tmp, tc, 1, "DESCRIPTION", DEF_DESCRIPTION
+    BuildTabPage tmp, tc, 2, "OCCURRENCE",  DEF_OCCURRENCE
+    BuildTabPage tmp, tc, 3, "MATERIAL",    DEF_MATERIAL
+    BuildRelationshipsTab tmp, tc, 4
+
+    ' 2. Toolbar AFTER (higher Z-order = visible above tabs)
+    CreateProfessionalToolbar tmp
+
+    DoCmd.Close acForm, tName, acSaveYes
+    DoCmd.CopyObject , "frmDetailTaxa", acForm, tName
+    DoCmd.DeleteObject acForm, tName
+
+    DoCmd.OpenForm "frmDetailTaxa", acDesign, , , , acHidden
+    Dim f As Form: Set f = Forms("frmDetailTaxa")
+
+    f.OnLoad    = "=FormLoad_Init()"
+    f.OnCurrent = "=FormCurrent_Update()"
+
+    Dim escCode As String
+    escCode = "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf & _
+              "    If KeyCode = vbKeyEscape Then Call CloseForm" & vbCrLf & _
+              "End Sub"
+    f.Module.InsertLines f.Module.CountOfLines + 1, escCode
+
+    DoCmd.Close acForm, "frmDetailTaxa", acSaveYes
+    MsgBox "Form v83 OK.", vbInformation
+End Sub
+
+' ================================================================
+' TOOLBAR - created AFTER tabs, Labels + Buttons + TextBoxes only
+' Toolbar TextBoxes: auto-label hidden via c.Name & "Label"
+' ================================================================
+Private Sub CreateProfessionalToolbar(frm As Form)
+    Dim c As Control
+
+    ' Background in Header section
+    Set c = CreateControl(frm.Name, acRectangle, acHeader, "", "", 0, 0, FORM_W, HEADER_H)
+    c.BackColor = COL_PANEL: c.BackStyle = 1: c.BorderStyle = 0
+
+    ' --- ROW 1: Y=150, height=700 ---
+    ' Taxon label (left)
+    Set c = CreateControl(frm.Name, acLabel, acHeader, "", "", 200, 150, 13500, 700)
+    c.Name = "lblStickyTaxon": c.Caption = "(taxon)": c.FontSize = 20: c.FontBold = True
+    c.ForeColor = COL_TEXT: c.BackStyle = 0
+
+    ' Buttons (right), X start=13900
+    Dim bX As Long: bX = 13900
+    Const bY As Long = 150
+    Const bW As Long = 1600
+    Const bH As Long = 700
+    Const bG As Long = 60
+
+    Set c = CreateControl(frm.Name, acCommandButton, acHeader, "", "", bX, bY, bW, bH)
+    c.Name = "btnPDF": c.Caption = "PDF": c.OnClick = "=ExportToPDF()"
+    c.BackColor = &H228844: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+    bX = bX + bW + bG
+
+    Set c = CreateControl(frm.Name, acCommandButton, acHeader, "", "", bX, bY, bW, bH)
+    c.Name = "btnDocx": c.Caption = "DOCX": c.OnClick = "=ExportCurrentDocx()"
+    c.BackColor = &H228844: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+    bX = bX + bW + bG
+
+    Set c = CreateControl(frm.Name, acCommandButton, acHeader, "", "", bX, bY, bW, bH)
+    c.Name = "btnPrev": c.Caption = "< PREV": c.OnClick = "=NavPrev()"
+    c.BackColor = &H3A3A3A: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+    bX = bX + bW + bG
+
+    Set c = CreateControl(frm.Name, acCommandButton, acHeader, "", "", bX, bY, bW, bH)
+    c.Name = "btnNext": c.Caption = "NEXT >": c.OnClick = "=NavNext()"
+    c.BackColor = &H3A3A3A: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+    bX = bX + bW + bG
+
+    Set c = CreateControl(frm.Name, acCommandButton, acHeader, "", "", bX, bY, bW, bH)
+    c.Name = "btnUndo": c.Caption = "UNDO": c.OnClick = "=UndoLastChange()"
+    c.BackColor = &H3A3A3A: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+    bX = bX + bW + bG
+
+    Set c = CreateControl(frm.Name, acCommandButton, acHeader, "", "", bX, bY, bW, bH)
+    c.Name = "btnCopyRec": c.Caption = "COPY": c.OnClick = "=CopyRecord()"
+    c.BackColor = &H3A3A3A: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+    bX = bX + bW + bG
+
+    Set c = CreateControl(frm.Name, acCommandButton, acHeader, "", "", bX, bY, bW, bH)
+    c.Name = "btnHistDetail": c.Caption = "HIST": c.OnClick = "=ShowHistoryDetail()"
+    c.BackColor = &H3A3A3A: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+    bX = bX + bW + bG
+
+    Set c = CreateControl(frm.Name, acCommandButton, acHeader, "", "", bX, bY, bW, bH)
+    c.Name = "btnDedup": c.Caption = "DEDUP": c.OnClick = "=DedupPipeFieldActive()"
+    c.BackColor = &H3A3A3A: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+    bX = bX + bW + bG
+
+    Set c = CreateControl(frm.Name, acCommandButton, acHeader, "", "", bX, bY, bW + 300, bH)
+    c.Name = "btnClose": c.Caption = "X CLOSE": c.OnClick = "=CloseForm()"
+    c.BackColor = &H550000: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+
+    ' --- ROW 2: Y=1000, height=500 ---
+    ' Rank/ID label
+    Set c = CreateControl(frm.Name, acLabel, acHeader, "", "", 200, 1050, 13500, 450)
+    c.Name = "lblStickyRank": c.Caption = "ID: ? | Rank: ?": c.FontSize = 10
+    c.ForeColor = COL_DIM: c.BackStyle = 0
+
+    ' txtID - no auto-label
+    Set c = CreateControl(frm.Name, acTextBox, acHeader, "", "", 13900, 1050, 1500, 450)
+    c.Name = "txtID": c.ControlSource = "ID": c.Locked = True
+    c.BackColor = &H383838: c.ForeColor = COL_TEXT: c.FontSize = 10: c.TextAlign = 2
+    ' Hide auto-label created by Access
+    On Error Resume Next
+    frm.Controls("txtIDLabel").Visible = False
+    frm.Controls("txtIDLabel").Caption = ""
+    On Error GoTo 0
+
+    ' txtHistLog
+    Set c = CreateControl(frm.Name, acTextBox, acHeader, "", "", 15600, 1050, 15200, 450)
+    c.Name = "txtHistLog": c.Locked = True
+    c.BackColor = &H282828: c.ForeColor = &H888888: c.FontSize = 9: c.BorderStyle = 0
+    On Error Resume Next
+    frm.Controls("txtHistLogLabel").Visible = False
+    frm.Controls("txtHistLogLabel").Caption = ""
+    On Error GoTo 0
+End Sub
+
+' ================================================================
+' TABS - BuildTabPage
+' ================================================================
+Private Sub BuildTabPage(frm As Form, tc As Control, pgIdx As Integer, sName As String, def As String)
+    If pgIdx >= tc.Pages.Count Then tc.Pages.Add
+    Dim pg As Page: Set pg = tc.Pages(pgIdx): pg.Caption = sName
+
+    ' Dark background
+    Dim bg As Control
+    Set bg = CreateControl(frm.Name, acRectangle, acDetail, pg.Name, "", 0, 0, tc.Width, tc.Height)
+    bg.BackColor = COL_BG: bg.BackStyle = 1: bg.BorderStyle = 0
+
+    ' Calculate column X positions
+    Dim col1_X As Long: col1_X = GRID_START_X
+    Dim col2_X As Long: col2_X = col1_X + GRID_LBL_W + GRID_GAP + GRID_TXT_W + GRID_COL_SPACE
+    Dim col3_X As Long: col3_X = col2_X + GRID_LBL_W + GRID_GAP + GRID_TXT_W + GRID_COL_SPACE
+    Dim wide_W As Long: wide_W = col3_X + GRID_LBL_W + GRID_GAP + GRID_TXT_W - (col1_X + GRID_LBL_W + GRID_GAP)
+
+    Dim rows() As String: rows = Split(def, vbLf)
+    Dim cY(0 To 2) As Long: cY(0) = 400: cY(1) = 400: cY(2) = 400
+    Dim colIdx As Integer: colIdx = 0
+    Dim r As Long
+
+    For r = 0 To UBound(rows)
+        Dim p() As String: p = Split(rows(r), "\")
+        If UBound(p) < 3 Then GoTo SkipR
+
+        Dim fName  As String:  fName  = p(0)
+        Dim isBig  As Integer: isBig  = CInt(p(1))
+        Dim isEdit As Boolean: isEdit = (p(2) = "1")
+        Dim H      As Long
+        Select Case p(3)
+            Case "L": H = 3000
+            Case "R": H = 1800
+            Case Else: H = 600
+        End Select
+
+        If isBig >= 1 Then
+            ' Wide field - synchronize Y across all columns
+            Dim mY As Long: mY = cY(0)
+            If cY(1) > mY Then mY = cY(1)
+            If cY(2) > mY Then mY = cY(2)
+            MakePair frm, pg, fName, col1_X, mY, GRID_LBL_W, wide_W, H, isEdit
+            mY = mY + H + 200
+            cY(0) = mY: cY(1) = mY: cY(2) = mY
+            colIdx = 0
+        Else
+            ' Narrow field - into current column
+            Dim xp As Long
+            Select Case colIdx
+                Case 0: xp = col1_X
+                Case 1: xp = col2_X
+                Case 2: xp = col3_X
+            End Select
+            MakePair frm, pg, fName, xp, cY(colIdx), GRID_LBL_W, GRID_TXT_W, H, isEdit
+            cY(colIdx) = cY(colIdx) + H + 200
+            colIdx = (colIdx + 1) Mod 3
+        End If
+SkipR:
+    Next r
+End Sub
+
+' ================================================================
+' MAKEPAIR - NO LOOPS, direct property sets only
+' TextBox auto-label suppressed via AccessibleName trick
+' ================================================================
+Private Sub MakePair(frm As Form, pg As Object, fName As String, _
+                     X As Long, Y As Long, lw As Long, tw As Long, _
+                     H As Long, edit As Boolean)
+    Dim safe As String: safe = Sanitize(fName)
+
+    ' Label
+    Dim lbl As Control
+    Set lbl = CreateControl(frm.Name, acLabel, acDetail, pg.Name, "", X, Y, lw, H)
+    lbl.Name = "lbl_" & safe: lbl.Caption = fName
+    lbl.ForeColor = COL_DIM: lbl.FontBold = True
+    lbl.TextAlign = 3: lbl.BackStyle = 0: lbl.FontSize = 10
+
+    ' TextBox
+    Dim txtW As Long: txtW = IIf(UCase(fName) = "SYNONYMY", tw - 800, tw)
+    Dim txt As Control
+    Set txt = CreateControl(frm.Name, acTextBox, acDetail, pg.Name, "", X + lw + GRID_GAP, Y, txtW, H)
+    txt.Name          = "txt_" & safe
+    txt.ControlSource = "[" & fName & "]"
+    txt.ForeColor     = IIf(edit, COL_TEXT, COL_DIM)
+    txt.BackColor     = IIf(edit, COL_PANEL, COL_LOCKED)
+    txt.Locked        = Not edit
+    txt.FontSize      = 11
+    ' Event properties - string type, work in design view
+    txt.OnDblClick    = "=ShowFieldPopup('" & fName & "',Form)"
+    If edit Then
+        If UCase(fName) = "TAXON" Then
+            txt.AfterUpdate = "=SaveFieldWithPropagate('" & fName & "',Form)"
+        Else
+            txt.AfterUpdate = "=SaveField('" & fName & "',Form)"
+        End If
+    End If
+
+    ' Hide auto-label created by Access for TextBox (name = txt.Name + "Label")
+    On Error Resume Next
+    frm.Controls(txt.Name & "Label").Visible = False
+    frm.Controls(txt.Name & "Label").Caption = ""
+    On Error GoTo 0
+
+    ' "+" button for SYNONYMY
+    If UCase(fName) = "SYNONYMY" And edit Then
+        Dim btnSyn As Control
+        Set btnSyn = CreateControl(frm.Name, acCommandButton, acDetail, pg.Name, "", _
+            X + lw + GRID_GAP + txtW + 50, Y, 700, H)
+        btnSyn.Name = "btnAddSyn": btnSyn.Caption = "+"
+        btnSyn.OnClick = "=AddSynonym()"
+        btnSyn.BackColor = &H228844: btnSyn.ForeColor = &HFFFFFF
+        btnSyn.FontSize = 14: btnSyn.FontBold = True
+    End If
+End Sub
+
+' ================================================================
+' RELATIONSHIPS TAB
+' ================================================================
+Private Sub BuildRelationshipsTab(frm As Form, tc As Control, pgIdx As Integer)
+    If pgIdx >= tc.Pages.Count Then tc.Pages.Add
+    Dim pg As Page: Set pg = tc.Pages(pgIdx): pg.Caption = "RELATIONSHIPS"
+
+    Dim bg As Control
+    Set bg = CreateControl(frm.Name, acRectangle, acDetail, pg.Name, "", 0, 0, tc.Width, tc.Height)
+    bg.BackColor = COL_BG: bg.BackStyle = 1: bg.BorderStyle = 0
+
+    Dim c As Control
+    Set c = CreateControl(frm.Name, acLabel, acDetail, pg.Name, "", 200, 200, 8000, 500)
+    c.Caption = "Related taxa (same Genus / Family)": c.Name = "lblRelHeader"
+    c.ForeColor = COL_TEXT: c.BackStyle = 0: c.FontSize = 11: c.FontBold = True
+
+    Set c = CreateControl(frm.Name, acCommandButton, acDetail, pg.Name, "", 8400, 180, 2000, 560)
+    c.Name = "btnLoadRel": c.Caption = "REFRESH": c.OnClick = "=ShowRelationships()"
+    c.BackColor = &H005580: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+
+    Set c = CreateControl(frm.Name, acLabel, acDetail, pg.Name, "", 200, 900, 4000, 400)
+    c.Caption = "Same Genus:": c.Name = "lblSameGenus"
+    c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+
+    Set c = CreateControl(frm.Name, acLabel, acDetail, pg.Name, "", 4400, 940, 10000, 320)
+    c.Name = "lblGenusVal": c.Caption = "(click REFRESH)": c.ForeColor = &H888888: c.BackStyle = 0
+
+    Set c = CreateControl(frm.Name, acListBox, acDetail, pg.Name, "", 200, 1380, 20000, 3200)
+    c.Name = "lstSameGenus": c.RowSourceType = "Value List": c.RowSource = ""
+    c.BackColor = &H1A1A1A: c.ForeColor = &HFFFFFF: c.FontSize = 10
+    c.ColumnCount = 4: c.ColumnWidths = "0;7000;5000;3000"
+
+    Set c = CreateControl(frm.Name, acLabel, acDetail, pg.Name, "", 200, 4700, 4000, 400)
+    c.Caption = "Same Family:": c.Name = "lblSameFamily"
+    c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+
+    Set c = CreateControl(frm.Name, acLabel, acDetail, pg.Name, "", 4400, 4740, 10000, 320)
+    c.Name = "lblFamilyVal": c.Caption = "": c.ForeColor = &H888888: c.BackStyle = 0
+
+    Set c = CreateControl(frm.Name, acListBox, acDetail, pg.Name, "", 200, 5180, 20000, 4500)
+    c.Name = "lstSameFamily": c.RowSourceType = "Value List": c.RowSource = ""
+    c.BackColor = &H1A1A1A: c.ForeColor = &HFFFFFF: c.FontSize = 10
+    c.ColumnCount = 4: c.ColumnWidths = "0;7000;5000;3000"
+
+    Set c = CreateControl(frm.Name, acCommandButton, acDetail, pg.Name, "", 200, 9840, 3200, 560)
+    c.Name = "btnOpenRelTaxon": c.Caption = "OPEN SELECTED": c.OnClick = "=OpenRelatedTaxon()"
+    c.BackColor = &H228844: c.ForeColor = COL_TEXT: c.FontSize = 10: c.FontBold = True
+
+    Set c = CreateControl(frm.Name, acLabel, acDetail, pg.Name, "", 3600, 9940, 14000, 360)
+    c.Name = "lblRelStats": c.Caption = "": c.ForeColor = &H888888: c.BackStyle = 0: c.FontSize = 9
+End Sub
+
+' ================================================================
+' POPUP FORM
+' ================================================================
+Public Sub CreateTextPopupForm()
+    On Error Resume Next
+    DoCmd.Close acForm, "frmTextPopup", acSaveNo
+    DoCmd.DeleteObject acForm, "frmTextPopup"
+    On Error GoTo 0
+
+    Dim tmp As Form: Set tmp = CreateForm
+    Dim tName As String: tName = tmp.Name
+    With tmp
+        .Caption = "Field Detail": .PopUp = True: .Modal = True
+        .BorderStyle = 1: .Width = 22000: .AutoCenter = True
+        .ControlBox = False
+        .Section(acDetail).BackColor = COL_BG
+        .Section(acDetail).Height = 18000
+        .KeyPreview = True
+    End With
+
+    Dim ctl As Control
+    Set ctl = CreateControl(tName, acLabel, acDetail, "", "", 400, 200, 21000, 600)
+    ctl.Name = "lblPopupTitle": ctl.ForeColor = COL_TEXT: ctl.FontSize = 14: ctl.FontBold = True
+
+    Set ctl = CreateControl(tName, acTextBox, acDetail, "", "", 400, 900, 20600, 15500)
+    ctl.Name = "txtPopupContent": ctl.BackColor = COL_PANEL: ctl.ForeColor = COL_TEXT
+    ctl.FontSize = 12
+
+    Set ctl = CreateControl(tName, acCommandButton, acDetail, "", "", 15800, 16800, 2500, 600)
+    ctl.Name = "btnPopupCopy": ctl.Caption = "Copy"
+    ctl.OnClick = "[Event Procedure]": ctl.FontSize = 11: ctl.FontBold = True
+
+    Set ctl = CreateControl(tName, acCommandButton, acDetail, "", "", 18500, 16800, 2500, 600)
+    ctl.Name = "btnPopupClose": ctl.Caption = "Close"
+    ctl.BackColor = &H3333BB: ctl.ForeColor = COL_TEXT
+    ctl.OnClick = "[Event Procedure]": ctl.FontSize = 11: ctl.FontBold = True
+
+    DoCmd.Close acForm, tName, acSaveYes
+    DoCmd.CopyObject , "frmTextPopup", acForm, tName
+    DoCmd.DeleteObject acForm, tName
+
+    DoCmd.OpenForm "frmTextPopup", acDesign, , , , acHidden
+    Dim df As Form: Set df = Forms("frmTextPopup")
+    If df.Module.CountOfLines > 0 Then df.Module.DeleteLines 1, df.Module.CountOfLines
+
+    Dim code As String
+    code = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+    code = code & "Private Sub Form_Load()" & vbCrLf & _
+                  "    On Error Resume Next" & vbCrLf & _
+                  "    Me!txtPopupContent.Value = Nz(TempVars(""PopupText""), """")" & vbCrLf & _
+                  "    Me!lblPopupTitle.Caption = Nz(TempVars(""PopupTitle""), """")" & vbCrLf & _
+                  "    Me!txtPopupContent.ScrollBars = 2" & vbCrLf & _
+                  "    Me!txtPopupContent.EnterKeyBehavior = True" & vbCrLf & _
+                  "End Sub" & vbCrLf & vbCrLf
+    code = code & "Private Sub btnPopupCopy_Click()" & vbCrLf & _
+                  "    On Error Resume Next" & vbCrLf & _
+                  "    Me!txtPopupContent.SetFocus" & vbCrLf & _
+                  "    Me!txtPopupContent.SelStart = 0" & vbCrLf & _
+                  "    Me!txtPopupContent.SelLength = Len(Me!txtPopupContent.Value)" & vbCrLf & _
+                  "    DoCmd.RunCommand acCmdCopy" & vbCrLf & _
+                  "    Me!txtPopupContent.SelLength = 0" & vbCrLf & _
+                  "End Sub" & vbCrLf & vbCrLf
+    code = code & "Private Sub btnPopupClose_Click()" & vbCrLf & _
+                  "    On Error Resume Next" & vbCrLf & _
+                  "    If Nz(TempVars(""PopupEditable""), 0) = 1 Then" & vbCrLf & _
+                  "        Dim ctlName As String" & vbCrLf & _
+                  "        ctlName = ""txt_"" & Replace(TempVars(""PopupFieldName""), "" "", ""_"")" & vbCrLf & _
+                  "        Forms(TempVars(""PopupCallerForm"")).Controls(ctlName).Value = Me!txtPopupContent.Value" & vbCrLf & _
+                  "    End If" & vbCrLf & _
+                  "    DoCmd.Close acForm, Me.Name" & vbCrLf & _
+                  "End Sub" & vbCrLf & vbCrLf
+    code = code & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf & _
+                  "    If KeyCode = vbKeyEscape Then DoCmd.Close acForm, Me.Name" & vbCrLf & _
+                  "End Sub"
+
+    df.Module.InsertLines 1, code
+    DoCmd.Close acForm, "frmTextPopup", acSaveYes
+End Sub
+
+' ================================================================
+' RUNTIME EVENTS
+' ================================================================
+Public Function FormLoad_Init() As Boolean
+    On Error Resume Next
+    bFormReady = False: bInCurrentUpdate = False
+    DoCmd.Maximize
+    bFormReady = True
+    FormLoad_Init = True
+End Function
+
+Public Function FormCurrent_Update() As Boolean
+    If Not bFormReady Then Exit Function
+    If bInCurrentUpdate Then Exit Function
+    bInCurrentUpdate = True
+    On Error Resume Next
+    Dim frm As Form: Set frm = Screen.ActiveForm
+    frm!lblStickyTaxon.Caption = Nz(frm!txt_TAXON, "New Record")
+    frm!lblStickyRank.Caption  = "ID: " & Nz(frm!txtID, "?") & " | Rank: " & Nz(frm!txt_Rank, "N/A")
+    bInCurrentUpdate = False
+    FormCurrent_Update = True
+End Function
+
+Public Function FormTimer_Hist() As Boolean
+    On Error Resume Next
+    Dim frm As Form: Set frm = Screen.ActiveForm
+    frm.TimerInterval = 0
+    Call UpdateHistLog
+    FormTimer_Hist = True
+End Function
+
+Public Function UpdateHistLog() As Boolean
+    On Error Resume Next
+    Dim frm As Form: Set frm = Screen.ActiveForm
+    If frm Is Nothing Then UpdateHistLog = False: Exit Function
+    Dim tID As Long: tID = Nz(frm!txtID, 0)
+    If tID = 0 Then frm!txtHistLog.Value = "(no record)": Exit Function
+    Dim rs As DAO.Recordset
+    Set rs = CurrentDb.OpenRecordset( _
+        "SELECT TOP 5 ActionType, FieldName, ChangeDate FROM Taxa_History " & _
+        "WHERE TaxonID=" & tID & " ORDER BY ChangeDate DESC")
+    Dim log As String: log = ""
+    Do While Not rs.EOF
+        log = log & Format(rs!ChangeDate, "dd.mm hh:nn") & " " & _
+              Left(Nz(rs!ActionType, ""), 4) & ":" & Left(Nz(rs!FieldName, ""), 12) & "  "
+        rs.MoveNext
+    Loop
+    rs.Close
+    frm!txtHistLog.Value = IIf(log = "", "(no history)", log)
+    UpdateHistLog = True
+End Function
+
+' ================================================================
+' NAVIGATION + HELPERS
+' ================================================================
+Public Function NavPrev() As Boolean
+    On Error Resume Next
+    DoCmd.GoToRecord , , acPrevious
+    If Err Then DoCmd.GoToRecord , , acLast
+    NavPrev = True
+End Function
+
+Public Function NavNext() As Boolean
+    On Error Resume Next
+    DoCmd.GoToRecord , , acNext
+    If Err Then DoCmd.GoToRecord , , acFirst
+    NavNext = True
+End Function
+
+Public Function CloseForm() As Boolean
+    On Error Resume Next
+    DoCmd.Close acForm, Screen.ActiveForm.Name, acSaveNo
+    CloseForm = True
+End Function
+
+Public Function NoSelect() As Boolean
+    On Error Resume Next
+    If TypeOf Screen.ActiveControl Is TextBox Then
+        Screen.ActiveControl.SelStart = 0
+        Screen.ActiveControl.SelLength = 0
+    End If
+    NoSelect = True
+End Function
+
+Public Function ApplyQuickFilter() As Boolean
+    On Error Resume Next
+    Dim f As Form: Set f = Screen.ActiveForm
+    Dim v As String: v = f!txtQuickSearch.Text
+    If v = "" Then
+        f.FilterOn = False
+    Else
+        f.Filter = "[TAXON] LIKE '*" & v & "*'"
+        f.FilterOn = True
+    End If
+    f!txtQuickSearch.SetFocus
+    f!txtQuickSearch.SelStart = Len(v)
+    ApplyQuickFilter = True
+End Function
+
+' ================================================================
+' SAVING FIELDS
+' Table routing aligned with vw_Complete_Taxa SQL structure:
+'   Taxa             : ID, Compare, TAXON, Genus, Species, AUTHOR, Phylum,
+'                      Family, Order, Class, Rank
+'   Taxa_Taxonomie   : TAXONOMIC PLACEMENT, Taxonomy_path, TAXON (alias),
+'                      TYPE TAXON, INCLUDED TAXONS
+'   Taxa_Popis       : ETYMOLOGY, DESCRIPTION, SIZE, DIAGNOSIS, APERTURE,
+'                      CROSS-SECTION, OPERCULUM, SCULPTURE, CLAVICLES,
+'                      CARDINAL_PROCESSES
+'   Taxa_Material    : TYPE MATERIAL, MATERIAL EXAMINED, FIGURES, SYNONYMY
+'   Taxa_Vyskyt      : OCCURRENCE, Geography, Locality, STRATIGRAPHY,
+'                      System, Formation, Member, Stage, Serie, Zone, Horizon
+'   Taxa_Poznamky    : REMARKS, Reference
+' ================================================================
+Public Function SaveField(fldName As String, frm As Form) As Boolean
+    On Error Resume Next
+    Dim recID As Long: recID = Nz(frm!txtID, 0)
+    If recID = 0 Then SaveField = False: Exit Function
+    Dim newVal As Variant: newVal = frm("txt_" & Sanitize(fldName)).Value
+    Dim tbl As String
+    Select Case UCase(fldName)
+        Case "GENUS", "SPECIES", "FAMILY", "ORDER", "CLASS", "PHYLUM", "AUTHOR", "RANK"
+            tbl = "Taxa"
+        Case "OCCURRENCE", "GEOGRAPHY", "LOCALITY", "STRATIGRAPHY", _
+             "SYSTEM", "FORMATION", "MEMBER", "STAGE", "SERIE", "ZONE", "HORIZON"
+            tbl = "Taxa_Vyskyt"
+        Case "TAXONOMIC PLACEMENT", "TAXON", "TYPE TAXON", "INCLUDED TAXONS", "TAXONOMY_PATH"
+            tbl = "Taxa_Taxonomie"
+        Case "ETYMOLOGY", "DESCRIPTION", "SIZE", "DIAGNOSIS", "APERTURE", _
+             "CROSS-SECTION", "OPERCULUM", "SCULPTURE", "CLAVICLES", "CARDINAL_PROCESSES"
+            tbl = "Taxa_Popis"
+        Case "TYPE MATERIAL", "MATERIAL EXAMINED", "SYNONYMY", "FIGURES"
+            tbl = "Taxa_Material"
+        Case "REMARKS", "REFERENCE"
+            tbl = "Taxa_Poznamky"
+        Case Else
+            tbl = "Taxa_Poznamky"
+    End Select
+    Dim wh As String: wh = IIf(tbl = "Taxa", "ID=" & recID, "TaxonID=" & recID)
+    CurrentDb.Execute "UPDATE [" & tbl & "] SET [" & fldName & "] = '" & _
+                      Replace(CStr(newVal), "'", "''") & "' WHERE " & wh, 128
+    SaveField = True
+End Function
+
+Public Function SaveFieldWithPropagate(fldName As String, frm As Form) As Boolean
+    On Error Resume Next
+    Dim tID As Long: tID = Nz(frm!txtID, 0)
+    If tID = 0 Then SaveFieldWithPropagate = False: Exit Function
+    Dim rOld As DAO.Recordset
+    Set rOld = CurrentDb.OpenRecordset("SELECT TAXON FROM Taxa WHERE ID=" & tID)
+    Dim oldVal As String: If Not rOld.EOF Then oldVal = Nz(rOld!TAXON, "")
+    rOld.Close
+    Call SaveField(fldName, frm)
+    If UCase(fldName) = "TAXON" Then
+        Dim newVal As String: newVal = Nz(frm.Controls("txt_TAXON").Value, "")
+        If oldVal <> "" And newVal <> "" And oldVal <> newVal Then
+            Dim cnt As Long: cnt = PropagateRename(oldVal, newVal, tID)
+            If cnt > 0 Then MsgBox "Rename propagated to " & cnt & " records.", vbInformation
+        End If
+    End If
+    SaveFieldWithPropagate = True
+End Function
+
+' ================================================================
+' UNDO
+' ================================================================
+Public Function UndoLastChange() As Boolean
+    On Error Resume Next
+    Dim tID As Long: tID = Nz(Screen.ActiveForm!txtID, 0)
+    If tID = 0 Then UndoLastChange = False: Exit Function
+    Dim rs As DAO.Recordset
+    Set rs = CurrentDb.OpenRecordset( _
+        "SELECT TOP 1 * FROM Taxa_History WHERE TaxonID=" & tID & " ORDER BY ChangeDate DESC")
+    If Not rs.EOF Then
+        CurrentDb.Execute "UPDATE [" & rs!TableName & "] SET [" & rs!FieldName & "] = '" & _
+            Replace(Nz(rs!OldValue, ""), "'", "''") & "' WHERE [" & _
+            IIf(rs!TableName = "Taxa", "ID", "TaxonID") & "] =" & tID, 128
+        CurrentDb.Execute "DELETE FROM Taxa_History WHERE HistoryID=" & rs!HistoryID, 128
+        Screen.ActiveForm.Refresh
+    End If
+    rs.Close
+    UndoLastChange = True
+End Function
+
+' ================================================================
+' BACKUP FOR UNDO
+' ================================================================
+Public Sub BackupFieldForUndo(tID As Long, fldName As String)
+    On Error Resume Next
+    Dim tbl As String
+    Select Case UCase(fldName)
+        Case "GENUS", "SPECIES", "FAMILY", "ORDER", "CLASS", "PHYLUM", "AUTHOR", "RANK"
+            tbl = "Taxa"
+        Case "OCCURRENCE", "GEOGRAPHY", "LOCALITY", "STRATIGRAPHY", _
+             "SYSTEM", "FORMATION", "MEMBER", "STAGE", "SERIE", "ZONE", "HORIZON"
+            tbl = "Taxa_Vyskyt"
+        Case "TAXONOMIC PLACEMENT", "TAXON", "TYPE TAXON", "INCLUDED TAXONS", "TAXONOMY_PATH"
+            tbl = "Taxa_Taxonomie"
+        Case "ETYMOLOGY", "DESCRIPTION", "SIZE", "DIAGNOSIS", "APERTURE", _
+             "CROSS-SECTION", "OPERCULUM", "SCULPTURE", "CLAVICLES", "CARDINAL_PROCESSES"
+            tbl = "Taxa_Popis"
+        Case "TYPE MATERIAL", "MATERIAL EXAMINED", "SYNONYMY", "FIGURES"
+            tbl = "Taxa_Material"
+        Case "REMARKS", "REFERENCE"
+            tbl = "Taxa_Poznamky"
+        Case Else
+            tbl = "Taxa_Poznamky"
+    End Select
+    Dim wh As String: wh = IIf(tbl = "Taxa", "ID=" & tID, "TaxonID=" & tID)
+    Dim rs As DAO.Recordset
+    Set rs = CurrentDb.OpenRecordset("SELECT [" & fldName & "] FROM [" & tbl & "] WHERE " & wh)
+    If Not rs.EOF Then
+        CurrentDb.Execute "INSERT INTO Taxa_History " & _
+            "(TaxonID, TableName, FieldName, OldValue, ActionType, ChangeDate) VALUES (" & _
+            tID & ", '" & tbl & "', '" & fldName & "', '" & _
+            Replace(Nz(rs.Fields(0), ""), "'", "''") & "', 'UPDATE', Now())", 128
+    End If
+    rs.Close
+End Sub
+
+' ================================================================
+' COPY RECORD
+' ================================================================
+Public Function CopyRecord() As Boolean
+    On Error GoTo CopyErr
+    Dim frm As Form: Set frm = Screen.ActiveForm
+    Dim srcID As Long: srcID = Nz(frm!txtID, 0)
+    If srcID = 0 Then CopyRecord = False: Exit Function
+    Dim db As DAO.Database: Set db = CurrentDb
+    Dim rsSrc As DAO.Recordset
+    Set rsSrc = db.OpenRecordset("SELECT * FROM Taxa WHERE ID=" & srcID)
+    If rsSrc.EOF Then rsSrc.Close: CopyRecord = False: Exit Function
+    Dim genus As String:  genus  = Nz(rsSrc!Genus, "")
+    Dim family As String: family = Nz(rsSrc!Family, "")
+    Dim order_ As String: order_ = Nz(rsSrc![Order], "")
+    Dim class_ As String: class_ = Nz(rsSrc![Class], "")
+    Dim phylum As String: phylum = Nz(rsSrc!Phylum, "")
+    Dim author As String: author = Nz(rsSrc!AUTHOR, "")
+    Dim rank   As String: rank   = Nz(rsSrc!Rank, "")
+    rsSrc.Close
+    Dim rsNew As DAO.Recordset
+    Set rsNew = db.OpenRecordset("Taxa", dbOpenDynaset)
+    rsNew.AddNew
+    rsNew!Genus = genus: rsNew!Family = family
+    rsNew![Order] = order_: rsNew![Class] = class_
+    rsNew!Phylum = phylum: rsNew!AUTHOR = author
+    rsNew!Rank = rank: rsNew!TAXON = "[NEW - edit name]"
+    rsNew.Update
+    Dim newID As Long: newID = rsNew!ID
+    rsNew.Close
+    db.Execute "INSERT INTO Taxa_Popis     (TaxonID) VALUES (" & newID & ")", 128
+    db.Execute "INSERT INTO Taxa_Material  (TaxonID) VALUES (" & newID & ")", 128
+    db.Execute "INSERT INTO Taxa_Vyskyt    (TaxonID) VALUES (" & newID & ")", 128
+    db.Execute "INSERT INTO Taxa_Taxonomie (TaxonID) VALUES (" & newID & ")", 128
+    db.Execute "INSERT INTO Taxa_Poznamky  (TaxonID) VALUES (" & newID & ")", 128
+    frm.Filter = "[ID] = " & newID: frm.FilterOn = True: frm.Refresh
+    MsgBox "Copied as ID=" & newID, vbInformation
+    CopyRecord = True: Exit Function
+CopyErr:
+    MsgBox "Copy error: " & Err.Description, vbCritical
+    CopyRecord = False
+End Function
+
+' ================================================================
+' RELATIONSHIPS
+' ================================================================
+Public Function ShowRelationships() As Boolean
+    On Error Resume Next
+    Dim frm As Form: Set frm = Screen.ActiveForm
+    Dim tID As Long: tID = Nz(frm!txtID, 0)
+    If tID = 0 Then ShowRelationships = False: Exit Function
+    Dim db As DAO.Database: Set db = CurrentDb
+    Dim rs As DAO.Recordset
+    Set rs = db.OpenRecordset("SELECT Genus, Family FROM Taxa WHERE ID=" & tID)
+    If rs.EOF Then rs.Close: ShowRelationships = False: Exit Function
+    Dim curGenus As String:  curGenus  = Nz(rs!Genus, "")
+    Dim curFamily As String: curFamily = Nz(rs!Family, "")
+    rs.Close
+    frm!lblGenusVal.Caption  = IIf(curGenus  = "", "(no genus)",  "Genus: "  & curGenus)
+    frm!lblFamilyVal.Caption = IIf(curFamily = "", "(no family)", "Family: " & curFamily)
+    Dim genItems As String: genItems = "": Dim genCount As Long: genCount = 0
+    If curGenus <> "" Then
+        Set rs = db.OpenRecordset("SELECT t.ID, t.TAXON, t.AUTHOR, t.Rank FROM Taxa t " & _
+            "WHERE t.Genus='" & Replace(curGenus, "'", "''") & "' AND t.ID<>" & tID & " ORDER BY t.TAXON")
+        Do While Not rs.EOF And genCount < 200
+            genItems = genItems & rs!ID & ";" & Replace(Nz(rs!TAXON, ""), ";", ",") & ";" & _
+                Replace(Nz(rs!AUTHOR, ""), ";", ",") & ";" & Replace(Nz(rs!Rank, ""), ";", ",") & ";"
+            genCount = genCount + 1: rs.MoveNext
+        Loop: rs.Close
+    End If
+    frm!lstSameGenus.RowSource = genItems
+    Dim famItems As String: famItems = "": Dim famCount As Long: famCount = 0
+    If curFamily <> "" Then
+        Set rs = db.OpenRecordset("SELECT t.ID, t.TAXON, t.AUTHOR, t.Rank FROM Taxa t " & _
+            "WHERE t.Family='" & Replace(curFamily, "'", "''") & "' AND t.ID<>" & tID & " ORDER BY t.TAXON")
+        Do While Not rs.EOF And famCount < 300
+            famItems = famItems & rs!ID & ";" & Replace(Nz(rs!TAXON, ""), ";", ",") & ";" & _
+                Replace(Nz(rs!AUTHOR, ""), ";", ",") & ";" & Replace(Nz(rs!Rank, ""), ";", ",") & ";"
+            famCount = famCount + 1: rs.MoveNext
+        Loop: rs.Close
+    End If
+    frm!lstSameFamily.RowSource = famItems
+    frm!lblRelStats.Caption = genCount & " in genus  |  " & famCount & " in family  |  Total: " & DCount("*", "Taxa") & " taxa"
+    ShowRelationships = True
+End Function
+
+Public Function OpenRelatedTaxon() As Boolean
+    On Error Resume Next
+    Dim frm As Form: Set frm = Screen.ActiveForm
+    Dim relID As Long: relID = 0
+    If frm!lstSameGenus.ItemsSelected.Count > 0 Then
+        relID = CLng(frm!lstSameGenus.Column(0))
+    ElseIf frm!lstSameFamily.ItemsSelected.Count > 0 Then
+        relID = CLng(frm!lstSameFamily.Column(0))
+    End If
+    If relID = 0 Then MsgBox "Select a taxon first.", vbInformation: OpenRelatedTaxon = False: Exit Function
+    On Error Resume Next: TempVars.Remove "DetailTaxonID": On Error GoTo 0
+    TempVars.Add "DetailTaxonID", relID
+    DoCmd.OpenForm "frmDetailTaxa", acNormal, , "ID=" & relID, , acNormal
+    OpenRelatedTaxon = True
+End Function
+
+' ================================================================
+' HISTORY + EXPORT
+' ================================================================
+Public Function ShowHistoryDetail() As Boolean
+    On Error Resume Next
+    Dim tID As Long: tID = Nz(Screen.ActiveForm!txtID, 0)
+    If tID = 0 Then ShowHistoryDetail = False: Exit Function
+    On Error Resume Next: TempVars.Remove "HistoryTaxonID": On Error GoTo 0
+    TempVars.Add "HistoryTaxonID", tID
+    DoCmd.OpenForm "frmHistory", acNormal
+    ShowHistoryDetail = True
+End Function
+
+Public Function ExportCurrentDocx() As Boolean
+    On Error Resume Next
+    Dim tID As Long: tID = Nz(Screen.ActiveForm!txtID, 0)
+    If tID = 0 Then ExportCurrentDocx = False: Exit Function
+    On Error Resume Next: TempVars.Remove "DetailTaxonID": On Error GoTo 0
+    TempVars.Add "DetailTaxonID", tID
+    DoCmd.OpenForm "frmExportDocx", acNormal
+    ExportCurrentDocx = True
+End Function
+
+Public Function ExportToPDF() As Boolean
+    On Error GoTo PDFErr
+    Dim frm As Form: Set frm = Screen.ActiveForm
+    Dim tID As Long: tID = Nz(frm!txtID, 0)
+    If tID = 0 Then MsgBox "No record loaded.", vbExclamation: ExportToPDF = False: Exit Function
+    Dim rs As DAO.Recordset
+    Set rs = CurrentDb.OpenRecordset( _
+        "SELECT t.TAXON, t.AUTHOR, t.Rank, t.Genus, t.Family, t.[Order], t.[Class], t.Phylum, " & _
+        "p.DESCRIPTION, p.DIAGNOSIS, p.APERTURE, p.[CROSS-SECTION], p.OPERCULUM, p.SCULPTURE, " & _
+        "p.CLAVICLES, p.CARDINAL_PROCESSES, p.ETYMOLOGY, p.SIZE, " & _
+        "m.SYNONYMY, m.[TYPE MATERIAL], m.[MATERIAL EXAMINED], m.FIGURES, " & _
+        "v.Geography, v.STRATIGRAPHY, v.Locality, v.OCCURRENCE, " & _
+        "v.System, v.Formation, v.Member, v.Stage, v.Serie, v.Zone, v.Horizon, " & _
+        "z.REMARKS, z.Reference " & _
+        "FROM ((((Taxa t LEFT JOIN Taxa_Popis p ON t.ID=p.TaxonID) " & _
+        "LEFT JOIN Taxa_Material m ON t.ID=m.TaxonID) " & _
+        "LEFT JOIN Taxa_Vyskyt v ON t.ID=v.TaxonID) " & _
+        "LEFT JOIN Taxa_Poznamky z ON t.ID=z.TaxonID) WHERE t.ID=" & tID)
+    If rs.EOF Then rs.Close: MsgBox "Record not found.", vbExclamation: ExportToPDF = False: Exit Function
+    Dim taxon As String: taxon = Nz(rs!TAXON, "ID" & tID)
+    Dim author As String: author = Nz(rs!AUTHOR, "")
+    Dim safeName As String: safeName = taxon
+    Dim ic As Integer
+    For ic = 1 To Len("\/:*?<>|")
+        safeName = Replace(safeName, Mid("\/:*?<>|", ic, 1), "_")
+    Next ic
+    Dim expFolder As String: expFolder = CurrentProject.Path & "\Export\"
+    If Dir(expFolder, vbDirectory) = "" Then MkDir expFolder
+    Dim pdfPath As String: pdfPath = expFolder & safeName & "_" & tID & ".pdf"
+    Dim wApp As Object: Set wApp = CreateObject("Word.Application"): wApp.Visible = False
+    Dim wDoc As Object: Set wDoc = wApp.Documents.Add
+    Dim wSel As Object: Set wSel = wApp.Selection
+    wSel.Font.Bold = True: wSel.Font.Size = 18: wSel.Font.Italic = True
+    wSel.TypeText taxon
+    wSel.Font.Italic = False: wSel.Font.Size = 13: wSel.Font.Bold = False
+    If author <> "" Then wSel.TypeText "  " & author
+    wSel.TypeParagraph: wSel.TypeParagraph
+    Dim secNames(11) As String, secFlds(11) As String
+    secNames(0) = "Synonymy":        secFlds(0) = "SYNONYMY"
+    secNames(1) = "Description":     secFlds(1) = "DESCRIPTION"
+    secNames(2) = "Diagnosis":       secFlds(2) = "DIAGNOSIS"
+    secNames(3) = "Remarks":         secFlds(3) = "REMARKS"
+    secNames(4) = "Occurrence":      secFlds(4) = "OCCURRENCE"
+    secNames(5) = "Geography":       secFlds(5) = "Geography"
+    secNames(6) = "Stratigraphy":    secFlds(6) = "STRATIGRAPHY"
+    secNames(7) = "Type Material":   secFlds(7) = "TYPE MATERIAL"
+    secNames(8) = "Aperture":        secFlds(8) = "APERTURE"
+    secNames(9) = "Cross-section":   secFlds(9) = "CROSS-SECTION"
+    secNames(10) = "Sculpture":      secFlds(10) = "SCULPTURE"
+    secNames(11) = "Etymology":      secFlds(11) = "ETYMOLOGY"
+    Dim si As Integer
+    For si = 0 To 11
+        If Nz(rs.Fields(secFlds(si)), "") <> "" Then
+            wSel.Font.Bold = True: wSel.Font.Size = 11
+            wSel.TypeText secNames(si): wSel.TypeParagraph
+            wSel.Font.Bold = False: wSel.Font.Size = 10
+            wSel.TypeText CStr(rs.Fields(secFlds(si))): wSel.TypeParagraph: wSel.TypeParagraph
+        End If
+    Next si
+    rs.Close
+    wDoc.ExportAsFixedFormat pdfPath, 17
+    wDoc.Close False: wApp.Quit
+    MsgBox "PDF exported:" & Chr(10) & pdfPath, vbInformation
+    ExportToPDF = True: Exit Function
+PDFErr:
+    On Error Resume Next: wApp.Quit
+    MsgBox "PDF error: " & Err.Description, vbCritical
+    ExportToPDF = False
+End Function
+
+' ================================================================
+' POPUP + DEDUP + PROPAGATION
+' ================================================================
+Public Function ShowFieldPopup(fldName As String, frm As Form) As Boolean
+    On Error Resume Next
+    Dim safe As String: safe = Sanitize(fldName)
+    Dim isLocked As Boolean: isLocked = frm.Controls("txt_" & safe).Locked
+    On Error Resume Next: TempVars.Remove "PopupText":       On Error GoTo 0
+    TempVars.Add "PopupText",       Nz(frm.Controls("txt_" & safe).Value, "")
+    On Error Resume Next: TempVars.Remove "PopupTitle":      On Error GoTo 0
+    TempVars.Add "PopupTitle",      fldName
+    On Error Resume Next: TempVars.Remove "PopupFieldName":  On Error GoTo 0
+    TempVars.Add "PopupFieldName",  fldName
+    On Error Resume Next: TempVars.Remove "PopupCallerForm": On Error GoTo 0
+    TempVars.Add "PopupCallerForm", frm.Name
+    On Error Resume Next: TempVars.Remove "PopupEditable":   On Error GoTo 0
+    TempVars.Add "PopupEditable",   IIf(isLocked, 0, 1)
+    DoCmd.OpenForm "frmTextPopup", acNormal, , , , acDialog
+    ShowFieldPopup = True
+End Function
+
+Public Function AddSynonym() As Boolean
+    On Error GoTo SynErr
+    Dim frm As Form: Set frm = Screen.ActiveForm
+    Dim tID As Long: tID = Nz(frm!txtID, 0)
+    If tID = 0 Then AddSynonym = False: Exit Function
+    Dim currentSyn As String: currentSyn = Nz(frm.Controls("txt_SYNONYMY").Value, "")
+    Dim newSyn As String
+    newSyn = InputBox("Enter synonym to add (appended with | separator):", "Add Synonym")
+    If Trim(newSyn) = "" Then AddSynonym = False: Exit Function
+    Call BackupFieldForUndo(tID, "SYNONYMY")
+    Dim merged As String
+    merged = IIf(currentSyn = "", Trim(newSyn), currentSyn & " | " & Trim(newSyn))
+    CurrentDb.Execute "UPDATE Taxa_Material SET [SYNONYMY] = '" & _
+                      Replace(merged, "'", "''") & "' WHERE TaxonID=" & tID, 128
+    frm.Controls("txt_SYNONYMY").Value = merged
+    AddSynonym = True: Exit Function
+SynErr:
+    MsgBox "Error: " & Err.Description, vbCritical
+    AddSynonym = False
+End Function
+
+Public Function DedupPipeFieldActive() As Boolean
+    On Error Resume Next
+    Dim frm As Form: Set frm = Screen.ActiveForm
+    Dim ctlName As String: ctlName = frm.ActiveControl.Name
+    If Left(ctlName, 4) = "txt_" Then
+        Dim fldName As String: fldName = Replace(Mid(ctlName, 5), "_", " ")
+        DedupPipeFieldActive = DedupPipeField(fldName)
+    Else
+        MsgBox "Click into the field you want to deduplicate first.", vbInformation
+        DedupPipeFieldActive = False
+    End If
+End Function
+
+Public Function DedupPipeField(fldName As String) As Boolean
+    On Error GoTo DedupErr
+    Dim frm As Form: Set frm = Screen.ActiveForm
+    Dim tID As Long: tID = Nz(frm!txtID, 0)
+    If tID = 0 Then DedupPipeField = False: Exit Function
+    Dim ctlName As String: ctlName = "txt_" & Replace(fldName, " ", "_")
+    Dim current As String: current = Nz(frm.Controls(ctlName).Value, "")
+    If current = "" Then DedupPipeField = False: Exit Function
+    Dim parts() As String: parts = Split(current, "|")
+    Dim seen As Object: Set seen = CreateObject("Scripting.Dictionary")
+    Dim result As String: result = ""
+    Dim p As Variant
+    For Each p In parts
+        Dim trimmed As String: trimmed = Trim(p)
+        If trimmed <> "" And Not seen.Exists(LCase(trimmed)) Then
+            seen(LCase(trimmed)) = 1
+            result = IIf(result = "", trimmed, result & " | " & trimmed)
+        End If
+    Next p
+    If result = current Then
+        MsgBox "No duplicates found.", vbInformation
+        DedupPipeField = False: Exit Function
+    End If
+    If MsgBox("Deduplicate " & fldName & "?" & Chr(10) & "Before: " & Left(current, 80) & Chr(10) & "After: " & Left(result, 80), vbYesNo) <> vbYes Then
+        DedupPipeField = False: Exit Function
+    End If
+    Call BackupFieldForUndo(tID, fldName)
+    Dim tbl As String
+    Select Case UCase(fldName)
+        Case "SYNONYMY", "TYPE MATERIAL", "MATERIAL EXAMINED", "FIGURES": tbl = "Taxa_Material"
+        Case "OCCURRENCE", "GEOGRAPHY", "STRATIGRAPHY", "LOCALITY", _
+             "SYSTEM", "FORMATION", "MEMBER", "STAGE", "SERIE", "ZONE", "HORIZON": tbl = "Taxa_Vyskyt"
+        Case "TAXONOMIC PLACEMENT", "INCLUDED TAXONS", "TAXONOMY_PATH": tbl = "Taxa_Taxonomie"
+        Case "REMARKS", "REFERENCE": tbl = "Taxa_Poznamky"
+        Case Else: tbl = "Taxa_Popis"
+    End Select
+    CurrentDb.Execute "UPDATE [" & tbl & "] SET [" & fldName & "] = '" & _
+                      Replace(result, "'", "''") & "' WHERE TaxonID = " & tID, 128
+    frm.Controls(ctlName).Value = result
+    DedupPipeField = True: Exit Function
+DedupErr:
+    MsgBox "Error: " & Err.Description, vbCritical
+    DedupPipeField = False
+End Function
+
+Public Function PropagateRename(oldName As String, newName As String, tID As Long) As Long
+    On Error GoTo PropErr
+    If Trim(oldName) = "" Or Trim(newName) = "" Then PropagateRename = 0: Exit Function
+    Dim rs As DAO.Recordset
+    Set rs = CurrentDb.OpenRecordset( _
+        "SELECT TaxonID, SYNONYMY FROM Taxa_Material " & _
+        "WHERE SYNONYMY LIKE '*" & Replace(oldName, "'", "''") & "*' AND TaxonID <> " & tID)
+    Dim cnt As Long: cnt = 0
+    Do While Not rs.EOF
+        Dim syn As String: syn = Nz(rs!SYNONYMY, "")
+        Dim parts() As String: parts = Split(syn, "|")
+        Dim newSyn As String: newSyn = ""
+        Dim p As Variant
+        For Each p In parts
+            Dim t As String: t = Trim(p)
+            If LCase(t) = LCase(Trim(oldName)) Then t = Trim(newName)
+            newSyn = IIf(newSyn = "", t, newSyn & " | " & t)
+        Next p
+        If newSyn <> syn Then
+            CurrentDb.Execute "UPDATE Taxa_Material SET [SYNONYMY] = '" & _
+                       Replace(newSyn, "'", "''") & "' WHERE TaxonID=" & rs!TaxonID, 128
+            cnt = cnt + 1
+        End If
+        rs.MoveNext
+    Loop
+    rs.Close
+    PropagateRename = cnt: Exit Function
+PropErr:
+    MsgBox "Propagation error: " & Err.Description, vbCritical
+    PropagateRename = 0
+End Function
+
+' ================================================================
+' HELPER FUNCTIONS
+' ================================================================
+Public Function Sanitize(s As String) As String
+    Sanitize = Replace(Replace(Replace(s, " ", "_"), "(", "_"), "-", "_")
+End Function

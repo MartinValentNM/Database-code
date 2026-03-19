@@ -1,0 +1,341 @@
+' =====================================================================
+' frmCompare4 - kompaktní verze (jeden scrollable panel, malé písmo)
+' Bez TabControl, bez acPage - žádné syntax chyby
+' =====================================================================
+Public Sub BuildForms_2_Compare()
+    On Error Resume Next
+    DoCmd.DeleteObject acForm, "frmCompare4"
+    On Error GoTo C4Err
+
+    Dim f As Form: Set f = CreateForm
+    Dim fn As String: fn = f.Name
+
+    ' ── Rozměry ─────────────────────────────────────────────────────
+    Dim FORM_W  As Long: FORM_W  = 27000
+    Dim labelW  As Long: labelW  = 2000
+    Dim colW    As Long: colW    = 6000
+    Dim rowH    As Long: rowH    = 320   ' kompaktní výška řádku
+    Dim bigH    As Long: bigH    = 700   ' výška pro velká pole
+    Dim secH    As Long: secH    = 380   ' výška sekčního nadpisu
+    Dim q       As String: q = Chr(34)
+
+    With f
+        .Caption            = "Taxon Comparison (up to 4)"
+        .Width              = FORM_W
+        .PopUp              = True
+        .Modal              = True
+        .ScrollBars         = 3          ' vertikální + horizontální scroll
+        .NavigationButtons  = False
+        .RecordSelectors    = False
+        .AutoCenter         = True
+        .BorderStyle        = 2
+        .KeyPreview         = True
+        .Section(acDetail).BackColor = &H202020
+        .Section(acDetail).Height    = 1000  ' bude zvětšena po přidání prvků
+    End With
+
+    Dim c As Control
+
+    ' ── Nadpis ──────────────────────────────────────────────────────
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 80, 12000, 480)
+    c.Caption = "TAXON COMPARISON"
+    c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 13: c.FontBold = True
+
+    ' ── Tlačítka ────────────────────────────────────────────────────
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 12400, 80, 2400, 480)
+    c.Name = "btnLoad": c.Caption = "LOAD IDs"
+    c.BackColor = &H228844: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 15000, 80, 2000, 480)
+    c.Name = "btnSaveAll": c.Caption = "SAVE ALL"
+    c.BackColor = &H5580: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 17200, 80, 1700, 480)
+    c.Name = "btnClose": c.Caption = "CLOSE"
+    c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    ' ── ComboBox + Label taxonu ──────────────────────────────────────
+    Dim ci As Integer
+    For ci = 1 To 4
+        Dim colX As Long: colX = labelW + 100 + CLng(ci - 1) * CLng(colW)
+
+        Set c = CreateControl(fn, acLabel, acDetail, "", "", colX, 660, 1300, 300)
+        c.Caption = "Taxon " & ci & ":"
+        c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 9
+
+        Dim cbo As Control
+        Set cbo = CreateControl(fn, acComboBox, acDetail, "", "", colX + 1400, 640, colW - 1600, 420)
+        cbo.Name           = "cboTaxon" & ci
+        cbo.RowSourceType  = "Table/Query"
+        cbo.RowSource      = "SELECT ID, TAXON FROM vw_Complete_Taxa ORDER BY TAXON"
+        cbo.ColumnCount    = 2
+        cbo.ColumnWidths   = "0cm;8cm"
+        cbo.BoundColumn    = 1
+        cbo.BackColor      = &H2B2B2B: cbo.ForeColor = &HFFFFFF
+        cbo.BorderColor    = &H444444: cbo.FontSize  = 10
+        cbo.AutoExpand     = True: cbo.LimitToList = True
+        cbo.OnChange       = "[Event Procedure]"
+
+        Set c = CreateControl(fn, acLabel, acDetail, "", "", colX, 1140, colW - 100, 380)
+        c.Name      = "lblTaxon" & ci
+        c.Caption   = "(empty)": c.ForeColor = &HFF8C00
+        c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+    Next ci
+
+    ' ── Pole ────────────────────────────────────────────────────────
+    ' Format: flds = FieldName, isLng = True/False, secHdr = nadpis sekce nebo ""
+    Dim fCount As Integer: fCount = 40
+    Dim flds(39)   As String
+    Dim isLng(39)  As Boolean
+    Dim secHdr(39) As String
+
+    flds(0)  = "TAXON":               isLng(0)  = False: secHdr(0)  = "── BASIC (Taxa) ──────────────────"
+    flds(1)  = "Genus":               isLng(1)  = False: secHdr(1)  = ""
+    flds(2)  = "Species":             isLng(2)  = False: secHdr(2)  = ""
+    flds(3)  = "AUTHOR":              isLng(3)  = False: secHdr(3)  = ""
+    flds(4)  = "Phylum":              isLng(4)  = False: secHdr(4)  = ""
+    flds(5)  = "Family":              isLng(5)  = False: secHdr(5)  = ""
+    flds(6)  = "Order":               isLng(6)  = False: secHdr(6)  = ""
+    flds(7)  = "Class":               isLng(7)  = False: secHdr(7)  = ""
+    flds(8)  = "Rank":                isLng(8)  = False: secHdr(8)  = ""
+    flds(9)  = "TAXONOMIC PLACEMENT": isLng(9)  = False: secHdr(9)  = "── TAXONOMY ──────────────────────"
+    flds(10) = "Taxonomy_path":       isLng(10) = False: secHdr(10) = ""
+    flds(11) = "TYPE TAXON":          isLng(11) = False: secHdr(11) = ""
+    flds(12) = "INCLUDED TAXONS":     isLng(12) = True:  secHdr(12) = ""
+    flds(13) = "ETYMOLOGY":           isLng(13) = True:  secHdr(13) = "── DESCRIPTION ───────────────────"
+    flds(14) = "DESCRIPTION":         isLng(14) = True:  secHdr(14) = ""
+    flds(15) = "SIZE":                isLng(15) = False: secHdr(15) = ""
+    flds(16) = "DIAGNOSIS":           isLng(16) = True:  secHdr(16) = ""
+    flds(17) = "APERTURE":            isLng(17) = True:  secHdr(17) = ""
+    flds(18) = "CROSS-SECTION":       isLng(18) = True:  secHdr(18) = ""
+    flds(19) = "OPERCULUM":           isLng(19) = True:  secHdr(19) = ""
+    flds(20) = "SCULPTURE":           isLng(20) = True:  secHdr(20) = ""
+    flds(21) = "CLAVICLES":           isLng(21) = True:  secHdr(21) = ""
+    flds(22) = "CARDINAL_PROCESSES":  isLng(22) = True:  secHdr(22) = ""
+    flds(23) = "TYPE MATERIAL":       isLng(23) = True:  secHdr(23) = "── MATERIAL ──────────────────────"
+    flds(24) = "MATERIAL EXAMINED":   isLng(24) = True:  secHdr(24) = ""
+    flds(25) = "FIGURES":             isLng(25) = False: secHdr(25) = ""
+    flds(26) = "SYNONYMY":            isLng(26) = True:  secHdr(26) = ""
+    flds(27) = "OCCURRENCE":          isLng(27) = True:  secHdr(27) = "── OCCURRENCE ────────────────────"
+    flds(28) = "Geography":           isLng(28) = False: secHdr(28) = ""
+    flds(29) = "Locality":            isLng(29) = True:  secHdr(29) = ""
+    flds(30) = "STRATIGRAPHY":        isLng(30) = True:  secHdr(30) = ""
+    flds(31) = "System":              isLng(31) = False: secHdr(31) = ""
+    flds(32) = "Formation":           isLng(32) = False: secHdr(32) = ""
+    flds(33) = "Member":              isLng(33) = False: secHdr(33) = ""
+    flds(34) = "Stage":               isLng(34) = False: secHdr(34) = ""
+    flds(35) = "Serie":               isLng(35) = False: secHdr(35) = ""
+    flds(36) = "Zone":                isLng(36) = False: secHdr(36) = ""
+    flds(37) = "Horizon":             isLng(37) = False: secHdr(37) = ""
+    flds(38) = "REMARKS":             isLng(38) = True:  secHdr(38) = "── REMARKS ───────────────────────"
+    flds(39) = "Reference":           isLng(39) = True:  secHdr(39) = ""
+
+    ' ── Vykreslení polí ─────────────────────────────────────────────
+    Dim rowY  As Long: rowY = 1620   ' startovní Y pod combo boxy
+    Dim fi    As Integer
+    Dim ci2   As Integer
+
+    For fi = 0 To fCount - 1
+        ' Sekční nadpis
+        If secHdr(fi) <> "" Then
+            Set c = CreateControl(fn, acLabel, acDetail, "", "", 100, rowY, FORM_W - 200, secH - 60)
+            c.Caption   = secHdr(fi)
+            c.ForeColor = &HFF8C00: c.BackStyle = 0
+            c.FontSize  = 8: c.FontBold = True
+            rowY = rowY + secH
+        End If
+
+        Dim thisH As Long: thisH = IIf(isLng(fi), bigH, rowH)
+
+        ' Popisek pole
+        Set c = CreateControl(fn, acLabel, acDetail, "", "", 100, rowY + 40, labelW - 120, thisH - 40)
+        c.Caption   = flds(fi)
+        c.ForeColor = &HC0C0C0: c.BackStyle = 0
+        c.FontSize  = 8: c.FontBold = True
+
+        ' Textová pole × 4
+        For ci2 = 1 To 4
+            Dim txX As Long: txX = labelW + 100 + CLng(ci2 - 1) * CLng(colW)
+            Dim txW As Long: txW = colW - 120
+            Set c = CreateControl(fn, acTextBox, acDetail, "", "", txX, rowY, txW, thisH)
+            c.Name        = "txt_" & Replace(Replace(flds(fi), " ", "_"), "-", "_") & "_" & ci2
+            c.BackColor   = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444
+            c.FontSize    = 9
+            If isLng(fi) Then
+                c.ScrollBars       = 2
+                c.EnterKeyBehavior = True
+            End If
+            c.OnClick = "[Event Procedure]"
+        Next ci2
+
+        rowY = rowY + thisH + 40
+    Next fi
+
+    ' ── Nastavit výšku sekce ─────────────────────────────────────────
+    ' MS Access limit je 22860 twips
+    Dim finalH As Long: finalH = rowY + 600
+    If finalH > 22860 Then finalH = 22860
+    f.Section(acDetail).Height = finalH
+
+    ' ── VBA modul ───────────────────────────────────────────────────
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+
+    Dim lnNum As Long: lnNum = 1
+
+    ' Chunk 1 – hlavička
+    Dim s1 As String
+    s1 = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+    s1 = s1 & "Private g_IDs(1 To 4) As Long" & vbCrLf & vbCrLf
+    f.Module.InsertLines lnNum, s1: lnNum = f.Module.CountOfLines + 1
+
+    ' Chunk 2 – click handlery po jednom
+    For fi = 0 To fCount - 1
+        For ci2 = 1 To 4
+            Dim cNm As String
+            cNm = "txt_" & Replace(Replace(flds(fi), " ", "_"), "-", "_") & "_" & ci2
+            Dim hS As String
+            hS = "Private Sub " & cNm & "_Click()" & vbCrLf
+            hS = hS & "    Call OpenPopupEditor(Me." & cNm & ")" & vbCrLf
+            hS = hS & "End Sub" & vbCrLf & vbCrLf
+            f.Module.InsertLines lnNum, hS: lnNum = f.Module.CountOfLines + 1
+        Next ci2
+    Next fi
+
+    ' Chunk 3 – Form_Load
+    Dim s3 As String
+    s3 = "Private Sub Form_Load()" & vbCrLf
+    s3 = s3 & "    On Error Resume Next" & vbCrLf
+    s3 = s3 & "    Dim preIDs As String: preIDs = Nz(TempVars(""Compare4IDs""), """")" & vbCrLf
+    s3 = s3 & "    If preIDs <> """" Then" & vbCrLf
+    s3 = s3 & "        Dim parts() As String: parts = Split(preIDs, ""|"")" & vbCrLf
+    s3 = s3 & "        Dim ci As Integer: ci = 1" & vbCrLf
+    s3 = s3 & "        Dim p As Variant" & vbCrLf
+    s3 = s3 & "        For Each p In parts" & vbCrLf
+    s3 = s3 & "            If Trim(p) <> """" And ci <= 4 Then" & vbCrLf
+    s3 = s3 & "                Me.Controls(""cboTaxon"" & ci).Value = CLng(Trim(p))" & vbCrLf
+    s3 = s3 & "                ci = ci + 1" & vbCrLf
+    s3 = s3 & "            End If" & vbCrLf
+    s3 = s3 & "        Next p" & vbCrLf
+    s3 = s3 & "        btnLoad_Click" & vbCrLf
+    s3 = s3 & "    End If" & vbCrLf
+    s3 = s3 & "End Sub" & vbCrLf & vbCrLf
+    f.Module.InsertLines lnNum, s3: lnNum = f.Module.CountOfLines + 1
+
+    ' Chunk 4 – btnLoad_Click
+    Dim s4 As String
+    s4 = "Public Sub btnLoad_Click()" & vbCrLf
+    s4 = s4 & "    On Error GoTo LoadErr" & vbCrLf
+    s4 = s4 & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    s4 = s4 & "    Dim ci As Integer" & vbCrLf
+    s4 = s4 & "    Dim fl(39) As String" & vbCrLf
+    For fi = 0 To fCount - 1
+        s4 = s4 & "    fl(" & fi & ")=" & q & flds(fi) & q & vbCrLf
+    Next fi
+    s4 = s4 & "    For ci = 1 To 4" & vbCrLf
+    s4 = s4 & "        Dim tID As Long: tID = Nz(Me.Controls(""cboTaxon"" & ci).Value, 0)" & vbCrLf
+    s4 = s4 & "        g_IDs(ci) = tID" & vbCrLf
+    s4 = s4 & "        Me.Controls(""lblTaxon"" & ci).Caption = IIf(tID=0," & q & "(empty)" & q & "," & q & "ID=" & q & " & tID)" & vbCrLf
+    s4 = s4 & "        If tID = 0 Then GoTo NextCol" & vbCrLf
+    s4 = s4 & "        Dim rs As DAO.Recordset" & vbCrLf
+    s4 = s4 & "        Set rs = db.OpenRecordset(" & q & "SELECT * FROM vw_Complete_Taxa WHERE ID=" & q & " & tID)" & vbCrLf
+    s4 = s4 & "        If Not rs.EOF Then" & vbCrLf
+    s4 = s4 & "            Me.Controls(""lblTaxon"" & ci).Caption = Nz(rs!TAXON," & q & "???" & q & ")" & vbCrLf
+    s4 = s4 & "            Dim fi As Integer" & vbCrLf
+    s4 = s4 & "            For fi = 0 To 39" & vbCrLf
+    s4 = s4 & "                On Error Resume Next" & vbCrLf
+    s4 = s4 & "                Dim cn As String" & vbCrLf
+    s4 = s4 & "                cn=" & q & "txt_" & q & " & Replace(Replace(fl(fi)," & q & " " & q & "," & q & "_" & q & ")," & q & "-" & q & "," & q & "_" & q & ") & " & q & "_" & q & " & ci" & vbCrLf
+    s4 = s4 & "                Me.Controls(cn).Value = Nz(rs.Fields(fl(fi))," & q & q & ")" & vbCrLf
+    s4 = s4 & "                On Error GoTo LoadErr" & vbCrLf
+    s4 = s4 & "            Next fi" & vbCrLf
+    s4 = s4 & "        End If" & vbCrLf
+    s4 = s4 & "        rs.Close" & vbCrLf
+    s4 = s4 & "        NextCol:" & vbCrLf
+    s4 = s4 & "    Next ci" & vbCrLf
+    s4 = s4 & "    Exit Sub" & vbCrLf
+    s4 = s4 & "LoadErr: MsgBox " & q & "Load error: " & q & " & Err.Description, vbCritical" & vbCrLf
+    s4 = s4 & "End Sub" & vbCrLf & vbCrLf
+    f.Module.InsertLines lnNum, s4: lnNum = f.Module.CountOfLines + 1
+
+    ' Chunk 5 – btnSaveAll_Click
+    Dim s5 As String
+    s5 = "Private Sub btnSaveAll_Click()" & vbCrLf
+    s5 = s5 & "    On Error Resume Next" & vbCrLf
+    s5 = s5 & "    Dim ci As Integer" & vbCrLf
+    s5 = s5 & "    Dim fl(39) As String" & vbCrLf
+    For fi = 0 To fCount - 1
+        s5 = s5 & "    fl(" & fi & ")=" & q & flds(fi) & q & vbCrLf
+    Next fi
+    s5 = s5 & "    For ci = 1 To 4" & vbCrLf
+    s5 = s5 & "        If g_IDs(ci) = 0 Then GoTo NextSave" & vbCrLf
+    s5 = s5 & "        Dim fi As Integer" & vbCrLf
+    s5 = s5 & "        For fi = 0 To 39" & vbCrLf
+    s5 = s5 & "            Dim cn As String" & vbCrLf
+    s5 = s5 & "            cn=" & q & "txt_" & q & " & Replace(Replace(fl(fi)," & q & " " & q & "," & q & "_" & q & ")," & q & "-" & q & "," & q & "_" & q & ") & " & q & "_" & q & " & ci" & vbCrLf
+    s5 = s5 & "            Dim ctl As Control: Set ctl = Me.Controls(cn)" & vbCrLf
+    s5 = s5 & "            Call BackupFieldForUndo(g_IDs(ci), fl(fi))" & vbCrLf
+    s5 = s5 & "            Call UpdateFieldInDB(g_IDs(ci), fl(fi), Nz(ctl.Value," & q & q & "))" & vbCrLf
+    s5 = s5 & "        Next fi" & vbCrLf
+    s5 = s5 & "        NextSave:" & vbCrLf
+    s5 = s5 & "    Next ci" & vbCrLf
+    s5 = s5 & "    MsgBox " & q & "Saved." & q & ", vbInformation" & vbCrLf
+    s5 = s5 & "End Sub" & vbCrLf & vbCrLf
+    f.Module.InsertLines lnNum, s5: lnNum = f.Module.CountOfLines + 1
+
+    ' Chunk 6 – KeyDown + btnClose
+    Dim s6 As String
+    s6 = "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf
+    s6 = s6 & "    If KeyCode = 27 Then DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf
+    s6 = s6 & "End Sub" & vbCrLf & vbCrLf
+    s6 = s6 & "Private Sub btnClose_Click()" & vbCrLf
+    s6 = s6 & "    DoCmd.Close acForm, Me.Name" & vbCrLf
+    s6 = s6 & "End Sub" & vbCrLf & vbCrLf
+    f.Module.InsertLines lnNum, s6: lnNum = f.Module.CountOfLines + 1
+
+    ' Chunk 7 – cboTaxon change handlery
+    Dim cii As Integer
+    For cii = 1 To 4
+        Dim sCbo As String
+        sCbo = "Private Sub cboTaxon" & cii & "_Change()" & vbCrLf
+        sCbo = sCbo & "    On Error Resume Next" & vbCrLf
+        sCbo = sCbo & "    Dim v As Variant: v = Me.cboTaxon" & cii & ".Value" & vbCrLf
+        sCbo = sCbo & "    If IsNumeric(v) Then" & vbCrLf
+        sCbo = sCbo & "        Dim rs As DAO.Recordset" & vbCrLf
+        sCbo = sCbo & "        Set rs = CurrentDb.OpenRecordset(""SELECT TAXON FROM vw_Complete_Taxa WHERE ID="" & CLng(v))" & vbCrLf
+        sCbo = sCbo & "        If Not rs.EOF Then Me.lblTaxon" & cii & ".Caption = Nz(rs!TAXON,""?"")" & vbCrLf
+        sCbo = sCbo & "        rs.Close" & vbCrLf
+        sCbo = sCbo & "    Else" & vbCrLf
+        sCbo = sCbo & "        Me.lblTaxon" & cii & ".Caption = ""(empty)""" & vbCrLf
+        sCbo = sCbo & "    End If" & vbCrLf
+        sCbo = sCbo & "End Sub" & vbCrLf & vbCrLf
+        f.Module.InsertLines lnNum, sCbo: lnNum = f.Module.CountOfLines + 1
+    Next cii
+
+    ' Chunk 8 – OpenPopupEditor
+    Dim s8 As String
+    s8 = "Public Sub OpenPopupEditor(ctl As Control)" & vbCrLf
+    s8 = s8 & "    TempVars.Add ""PopupText"", Nz(ctl.Value, """")" & vbCrLf
+    s8 = s8 & "    TempVars.Add ""PopupFieldName"", ctl.Name" & vbCrLf
+    s8 = s8 & "    TempVars.Add ""PopupSaved"", ""0""" & vbCrLf
+    s8 = s8 & "    DoCmd.OpenForm ""frmTextEditor"", acNormal, , , , acDialog" & vbCrLf
+    s8 = s8 & "    If TempVars(""PopupSaved"") = ""1"" Then ctl.Value = TempVars(""PopupText"")" & vbCrLf
+    s8 = s8 & "End Sub" & vbCrLf
+    f.Module.InsertLines lnNum, s8
+
+    ' ── Uložit a přejmenovat ────────────────────────────────────────
+    Dim tC4 As String: tC4 = f.Name
+    DoCmd.Close acForm, tC4, acSaveYes
+    DoCmd.CopyObject , "frmCompare4", acForm, tC4
+    DoCmd.DeleteObject acForm, tC4
+    DoEvents
+    Exit Sub
+
+C4Err:
+    MsgBox "CreateCompare4Form Err " & Err.Number & " (line " & Erl & "): " & Err.Description, vbCritical
+	MsgBox "PACKAGE 2 OK: frmCompare4 created.", vbInformation
+End Sub

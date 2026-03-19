@@ -1,0 +1,350 @@
+' ============================================================
+' PACKAGE 5 - PREVIEW AND REPORT
+' Run: BuildForms_5_PreviewReport
+' Creates: frmQuickPreview, rptTaxaDetail
+' ============================================================
+
+Option Compare Database
+Option Explicit
+
+' ===== COLORS =====
+Private Const C_BG As Long = &H202020&
+Private Const C_PANEL As Long = &H2B2B2B&
+Private Const C_ACCENT As Long = &HFF8C00&
+Private Const C_TEXT As Long = &HFFFFFF&
+Private Const C_DIM As Long = &HC0C0C0&
+Private Const C_BORDER As Long = &H444444&
+
+' =====================================================================
+' frmQuickPreview - ROZŠÍŘENO o nová pole
+' =====================================================================
+Private Sub CreateQuickPreviewForm()
+    On Error Resume Next
+    DoCmd.DeleteObject acForm, "frmQuickPreview"
+    On Error GoTo 0
+
+    Dim f As Form: Set f = CreateForm
+    f.HasModule = True       ' MUST be set before any Module access
+    f.KeyPreview = True
+    Dim fn As String: fn = f.Name
+    With f
+        .Caption = "Quick Preview": .Width = 11000: .PopUp = True: .Modal = False
+        .ScrollBars = 2: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = False: .BorderStyle = 1
+        .Section(acDetail).BackColor = &H252525&: .Section(acDetail).Height = 18000
+    End With
+    Dim c As Control
+
+    ' Taxon name - large
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 10400, 700)
+    c.Name = "lblTaxonName": c.Caption = "": c.ForeColor = &HFF8C00&
+    c.BackStyle = 0: c.FontSize = 18: c.FontBold = True
+
+    ' Rank | Family | Order
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 1000, 10400, 450)
+    c.Name = "lblRankFamily": c.Caption = "": c.ForeColor = &HC0C0C0&
+    c.BackStyle = 0: c.FontSize = 11
+
+    ' Separator
+    Set c = CreateControl(fn, acLine, acDetail, "", "", 200, 1600, 10400, 0)
+
+    ' Definice polí pro preview
+    ' Format: (labelCaption, controlName, height)
+    Dim fLabels(21) As String, fCtls(21) As String, fH(21) As Integer
+    fLabels(0)  = "Author:":              fCtls(0)  = "lblAuthor":      fH(0)  = 400
+    fLabels(1)  = "Placement:":           fCtls(1)  = "lblTaxPlac":     fH(1)  = 400
+    fLabels(2)  = "Tax. Path:":           fCtls(2)  = "lblTaxPath":     fH(2)  = 400
+    fLabels(3)  = "Type Taxon:":          fCtls(3)  = "lblTypeTaxon":   fH(3)  = 400
+    fLabels(4)  = "Included Taxons:":     fCtls(4)  = "lblInclTaxons":  fH(4)  = 400
+    fLabels(5)  = "Etymology:":           fCtls(5)  = "lblEtymology":   fH(5)  = 400
+    fLabels(6)  = "Size:":                fCtls(6)  = "lblSize":        fH(6)  = 400
+    fLabels(7)  = "Description:":         fCtls(7)  = "lblDesc":        fH(7)  = 1200
+    fLabels(8)  = "Diagnosis:":           fCtls(8)  = "lblDiagnosis":   fH(8)  = 800
+    fLabels(9)  = "Aperture:":            fCtls(9)  = "lblAperture":    fH(9)  = 600
+    fLabels(10) = "Cross-section:":       fCtls(10) = "lblCrossSection":fH(10) = 600
+    fLabels(11) = "Operculum:":           fCtls(11) = "lblOperculum":   fH(11) = 600
+    fLabels(12) = "Sculpture:":           fCtls(12) = "lblSculpture":   fH(12) = 400
+    fLabels(13) = "Clavicles:":           fCtls(13) = "lblClavicles":   fH(13) = 400
+    fLabels(14) = "Cardinal Proc.:":      fCtls(14) = "lblCardProc":    fH(14) = 400
+    fLabels(15) = "Occurrence:":          fCtls(15) = "lblOccurrence":  fH(15) = 400
+    fLabels(16) = "Geography:":           fCtls(16) = "lblGeog":        fH(16) = 400
+    fLabels(17) = "Stratigraphy:":        fCtls(17) = "lblStrat":       fH(17) = 400
+    fLabels(18) = "Locality:":            fCtls(18) = "lblLocal":       fH(18) = 400
+    fLabels(19) = "Synonymy:":            fCtls(19) = "lblSyn":         fH(19) = 600
+    fLabels(20) = "Type Material:":       fCtls(20) = "lblTypeMat":     fH(20) = 400
+    fLabels(21) = "Remarks:":             fCtls(21) = "lblRemarks":     fH(21) = 600
+
+    Dim yPos As Long: yPos = 1800
+    Dim fi As Integer
+    For fi = 0 To 21
+        Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, yPos, 2000, fH(fi))
+        c.Caption = fLabels(fi): c.ForeColor = &H888888&: c.BackStyle = 0: c.FontSize = 9: c.FontBold = True
+        Set c = CreateControl(fn, acLabel, acDetail, "", "", 2300, yPos, 8100, fH(fi))
+        c.Name = fCtls(fi): c.Caption = "": c.ForeColor = &HDDDDDD&
+        c.BackStyle = 0: c.FontSize = 10
+        yPos = yPos + fH(fi) + 150
+    Next fi
+
+    f.Section(acDetail).Height = yPos + 1200
+
+    ' Buttons
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 200, yPos + 200, 2200, 500)
+    c.Name = "btnOpenFull": c.Caption = "OPEN DETAIL": c.BackColor = &H228844&: c.ForeColor = &HFFFFFF&
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 2600, yPos + 200, 1500, 500)
+    c.Name = "btnClose": c.Caption = "CLOSE": c.BackColor = &H111155&: c.ForeColor = &HFFFFFF&
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Dim q As String: q = Chr(34)
+    Dim vba As String
+    vba = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+    vba = vba & "Private g_TaxonID As Long" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub Form_Load()" & vbCrLf
+    vba = vba & "    On Error GoTo LoadErr" & vbCrLf
+    vba = vba & "    g_TaxonID = Nz(TempVars(" & q & "PreviewTaxonID" & q & "), 0)" & vbCrLf
+    vba = vba & "    If g_TaxonID = 0 Then MsgBox " & q & "No taxon ID set." & q & ", vbExclamation: DoCmd.Close acForm, Me.Name: Exit Sub" & vbCrLf
+    vba = vba & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset" & vbCrLf
+    ' Rozšířený SQL dotaz - všechny tabulky
+    Dim previewSQL As String
+    previewSQL = "SELECT t.TAXON, t.AUTHOR, t.Rank, t.Genus, t.Species, t.Family, t.[Order], t.[Class], t.Phylum, " & _
+                 "tx.[TAXONOMIC PLACEMENT], tx.Taxonomy_path, tx.[TYPE TAXON], tx.[INCLUDED TAXONS], " & _
+                 "p.ETYMOLOGY, p.DESCRIPTION, p.SIZE, p.DIAGNOSIS, p.APERTURE, p.[CROSS-SECTION], p.OPERCULUM, p.SCULPTURE, p.CLAVICLES, p.CARDINAL_PROCESSES, " & _
+                 "m.[TYPE MATERIAL], m.[MATERIAL EXAMINED], m.FIGURES, m.SYNONYMY, " & _
+                 "v.OCCURRENCE, v.Geography, v.Locality, v.Stratigraphy, v.System, v.Formation, v.Member, v.Stage, v.Serie, v.Zone, v.Horizon, " & _
+                 "pz.REMARKS, pz.Reference " & _
+                 "FROM ((((Taxa t LEFT JOIN Taxa_Taxonomie tx ON t.ID=tx.TaxonID) " & _
+                 "LEFT JOIN Taxa_Popis p ON t.ID=p.TaxonID) " & _
+                 "LEFT JOIN Taxa_Material m ON t.ID=m.TaxonID) " & _
+                 "LEFT JOIN Taxa_Vyskyt v ON t.ID=v.TaxonID) " & _
+                 "LEFT JOIN Taxa_Poznamky pz ON t.ID=pz.TaxonID WHERE t.ID="
+    vba = vba & "    Set rs = db.OpenRecordset(" & q & previewSQL & q & " & g_TaxonID)" & vbCrLf
+    vba = vba & "    If rs.EOF And rs.BOF Then MsgBox " & q & "Taxon ID " & q & " & g_TaxonID & " & q & " not found." & q & ", vbExclamation: rs.Close: DoCmd.Close acForm, Me.Name: Exit Sub" & vbCrLf
+
+    ' Hlavní pole
+    vba = vba & "    Me!lblTaxonName.Caption = Nz(rs!TAXON, " & q & "???" & q & ")" & vbCrLf
+    vba = vba & "    Me!lblRankFamily.Caption = Nz(rs!Rank, " & q & q & ")" & _
+                " & IIf(Nz(rs!Family," & q & q & ")<>" & q & q & ", " & q & "  |  " & q & " & rs!Family, " & q & q & ")" & _
+                " & IIf(Nz(rs![Order]," & q & q & ")<>" & q & q & ", " & q & "  |  " & q & " & rs![Order], " & q & q & ")" & _
+                " & IIf(Nz(rs!Phylum," & q & q & ")<>" & q & q & ", " & q & "  |  " & q & " & rs!Phylum, " & q & q & ")" & vbCrLf
+
+    ' Taxonomie
+    vba = vba & "    Me!lblAuthor.Caption      = Left(Nz(rs!AUTHOR, " & q & "(not specified)" & q & "), 150)" & vbCrLf
+    vba = vba & "    Me!lblTaxPlac.Caption     = Left(Nz(rs.Fields(" & q & "TAXONOMIC PLACEMENT" & q & "), " & q & q & "), 200)" & vbCrLf
+    vba = vba & "    Me!lblTaxPath.Caption     = Left(Nz(rs!Taxonomy_path, " & q & q & "), 200)" & vbCrLf
+    vba = vba & "    Me!lblTypeTaxon.Caption   = Left(Nz(rs.Fields(" & q & "TYPE TAXON" & q & "), " & q & q & "), 150)" & vbCrLf
+    vba = vba & "    Me!lblInclTaxons.Caption  = Left(Nz(rs.Fields(" & q & "INCLUDED TAXONS" & q & "), " & q & q & "), 150)" & vbCrLf
+
+    ' Popis
+    vba = vba & "    Me!lblEtymology.Caption   = Left(Nz(rs!ETYMOLOGY, " & q & q & "), 150)" & vbCrLf
+    vba = vba & "    Me!lblSize.Caption        = Left(Nz(rs!SIZE, " & q & q & "), 100)" & vbCrLf
+    vba = vba & "    Me!lblDesc.Caption        = Left(Nz(rs!DESCRIPTION, " & q & "(no description)" & q & "), 400)" & vbCrLf
+    vba = vba & "    Me!lblDiagnosis.Caption   = Left(Nz(rs!DIAGNOSIS, " & q & q & "), 250)" & vbCrLf
+
+    ' Morfologie
+    vba = vba & "    Me!lblAperture.Caption    = Left(Nz(rs!APERTURE, " & q & q & "), 200)" & vbCrLf
+    vba = vba & "    Me!lblCrossSection.Caption= Left(Nz(rs.Fields(" & q & "CROSS-SECTION" & q & "), " & q & q & "), 200)" & vbCrLf
+    vba = vba & "    Me!lblOperculum.Caption   = Left(Nz(rs!OPERCULUM, " & q & q & "), 200)" & vbCrLf
+    vba = vba & "    Me!lblSculpture.Caption   = Left(Nz(rs!SCULPTURE, " & q & q & "), 150)" & vbCrLf
+    vba = vba & "    Me!lblClavicles.Caption   = Left(Nz(rs!CLAVICLES, " & q & q & "), 150)" & vbCrLf
+    vba = vba & "    Me!lblCardProc.Caption    = Left(Nz(rs!CARDINAL_PROCESSES, " & q & q & "), 150)" & vbCrLf
+
+    ' Výskyt
+    vba = vba & "    Me!lblOccurrence.Caption  = Left(Nz(rs!OCCURRENCE, " & q & q & "), 150)" & vbCrLf
+    vba = vba & "    Me!lblGeog.Caption        = Left(Nz(rs!Geography, " & q & "(not specified)" & q & "), 150)" & vbCrLf
+    vba = vba & "    Me!lblStrat.Caption       = Left(Nz(rs!Stratigraphy, " & q & "(not specified)" & q & "), 150)" & vbCrLf
+    vba = vba & "    Me!lblLocal.Caption       = Left(Nz(rs!Locality, " & q & "(not specified)" & q & "), 150)" & vbCrLf
+
+    ' Materiál + synonyma
+    vba = vba & "    Me!lblSyn.Caption         = Left(Nz(rs!SYNONYMY, " & q & "(no synonymy)" & q & "), 200)" & vbCrLf
+    vba = vba & "    Me!lblTypeMat.Caption     = Left(Nz(rs.Fields(" & q & "TYPE MATERIAL" & q & "), " & q & q & "), 150)" & vbCrLf
+
+    ' Poznámky
+    vba = vba & "    Me!lblRemarks.Caption     = Left(Nz(rs!REMARKS, " & q & q & "), 200)" & vbCrLf
+
+    vba = vba & "    rs.Close" & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "LoadErr:" & vbCrLf
+    vba = vba & "    MsgBox " & q & "Preview error (" & q & " & Err.Number & " & q & "): " & q & " & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "    On Error Resume Next: DoCmd.Close acForm, Me.Name" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnOpenFull_Click()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    DoCmd.Close acForm, Me.Name" & vbCrLf
+    vba = vba & "    DoCmd.OpenForm " & q & "frmDetailTaxa" & q & ", acNormal, , " & q & "ID=" & q & " & g_TaxonID" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf & _
+        "    If KeyCode = 27 Then DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf & _
+        "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnClose_Click(): DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tQP As String: tQP = f.Name
+    DoCmd.Close acForm, tQP, acSaveYes
+    DoCmd.CopyObject , "frmQuickPreview", acForm, tQP
+    DoCmd.DeleteObject acForm, tQP
+End Sub
+
+' =====================================================================
+' rptTaxaDetail - ROZŠÍŘENO o všechna pole ze schématu
+' =====================================================================
+Public Sub BuildForms_5_PreviewReport()
+    On Error GoTo Err5
+    Debug.Print "1/2 CreateQuickPreviewForm..."
+    CreateQuickPreviewForm
+    Debug.Print "2/2 CreateTaxaReport_Ultimate..."
+    CreateTaxaReport_Ultimate
+    MsgBox "PACKAGE 5 OK: QuickPreview + Report created.", vbInformation
+    Exit Sub
+Err5:
+    MsgBox "ERROR in package 5!" & Chr(10) & "Error " & Err.Number & ": " & Err.Description, vbCritical
+End Sub
+
+Public Sub CreateTaxaReport_Ultimate()
+    On Error Resume Next
+    DoCmd.Close acReport, "rptTaxaDetail", acSaveNo
+    DoCmd.DeleteObject acReport, "rptTaxaDetail"
+    On Error GoTo 0
+
+    Dim rpt As Report: Set rpt = CreateReport
+    Dim rName As String: rName = rpt.Name
+
+    With rpt
+        .Caption = "Taxonomic Sheet"
+        .RecordSource = "vw_Complete_Taxa"
+        .Section(acDetail).Height = 40000&
+        .Section(acDetail).BackColor = 16777215&
+    End With
+
+    Dim c As Control
+
+    ' ---- HLAVIČKA: TAXON (kurzíva pro genus/species) ----
+    Set c = CreateReportControl(rName, acTextBox, acDetail, "", "", 100, 100, 10000, 800)
+    c.Name = "txtTaxon"
+    c.ControlSource = "=IIf([Rank]='Genus' Or [Rank]='Species','<i>' & [TAXON] & '</i>',[TAXON])"
+    c.TextFormat = 1
+    c.FontSize = 22: c.FontBold = True: c.ForeColor = 0: c.BorderStyle = 0
+
+    ' AUTHOR
+    Set c = CreateReportControl(rName, acTextBox, acDetail, "", "", 100, 900, 10000, 400)
+    c.ControlSource = "AUTHOR": c.FontSize = 14: c.ForeColor = 8421504&: c.BorderStyle = 0
+
+    ' RANK + PHYLUM/CLASS/ORDER/FAMILY inline
+    Set c = CreateReportControl(rName, acTextBox, acDetail, "", "", 100, 1350, 10000, 400)
+    c.ControlSource = "=Nz([Rank],'') & IIf(Nz([Phylum],'')='','','  |  Phylum: ' & [Phylum]) & IIf(Nz([Class],'')='','','  |  Class: ' & [Class]) & IIf(Nz([Order],'')='','','  |  Order: ' & [Order]) & IIf(Nz([Family],'')='','','  |  Family: ' & [Family])"
+    c.FontSize = 10: c.ForeColor = 4210752&: c.BorderStyle = 0: c.CanGrow = True
+
+    Dim Y As Long: Y = 1900
+
+    ' ================================================================
+    ' SEKCE: TAXONOMIE
+    ' ================================================================
+    Y = AddReportSectionHeader(rName, "TAXONOMY", Y)
+    Y = AddReportLine(rName, "Genus:",              "Genus",                   Y)
+    Y = AddReportLine(rName, "Species:",            "Species",                 Y)
+    Y = AddReportLine(rName, "Placement:",          "[TAXONOMIC PLACEMENT]",   Y, True)
+    Y = AddReportLine(rName, "Tax. Path:",          "Taxonomy_path",           Y)
+    Y = AddReportLine(rName, "Type Taxon:",         "[TYPE TAXON]",            Y)
+    Y = AddReportLine(rName, "Included Taxons:",    "[INCLUDED TAXONS]",       Y, True)
+
+    ' ================================================================
+    ' SEKCE: POPIS
+    ' ================================================================
+    Y = AddReportSectionHeader(rName, "DESCRIPTION", Y)
+    Y = AddReportLine(rName, "Etymology:",          "ETYMOLOGY",               Y, True)
+    Y = AddReportLine(rName, "Size:",               "SIZE",                    Y)
+    Y = AddReportLine(rName, "Description:",        "DESCRIPTION",             Y, True)
+    Y = AddReportLine(rName, "Diagnosis:",          "DIAGNOSIS",               Y, True)
+
+    ' ================================================================
+    ' SEKCE: MORFOLOGIE
+    ' ================================================================
+    Y = AddReportSectionHeader(rName, "MORPHOLOGY", Y)
+    Y = AddReportLine(rName, "Aperture:",           "APERTURE",                Y, True)
+    Y = AddReportLine(rName, "Cross-section:",      "[CROSS-SECTION]",         Y, True)
+    Y = AddReportLine(rName, "Operculum:",          "OPERCULUM",               Y, True)
+    Y = AddReportLine(rName, "Sculpture:",          "SCULPTURE",               Y, True)
+    Y = AddReportLine(rName, "Clavicles:",          "CLAVICLES",               Y, True)
+    Y = AddReportLine(rName, "Cardinal Proc.:",     "CARDINAL_PROCESSES",      Y, True)
+
+    ' ================================================================
+    ' SEKCE: MATERIÁL
+    ' ================================================================
+    Y = AddReportSectionHeader(rName, "MATERIAL", Y)
+    Y = AddReportLine(rName, "Type Material:",      "[TYPE MATERIAL]",         Y, True)
+    Y = AddReportLine(rName, "Mat. Examined:",      "[MATERIAL EXAMINED]",     Y, True)
+    Y = AddReportLine(rName, "Figures:",            "FIGURES",                 Y)
+    Y = AddReportLine(rName, "Synonymy:",           "SYNONYMY",                Y, True)
+
+    ' ================================================================
+    ' SEKCE: VÝSKYT
+    ' ================================================================
+    Y = AddReportSectionHeader(rName, "OCCURRENCE", Y)
+    Y = AddReportLine(rName, "Occurrence:",         "OCCURRENCE",              Y, True)
+    Y = AddReportLine(rName, "Geography:",          "Geography",               Y)
+    Y = AddReportLine(rName, "Locality:",           "Locality",                Y)
+    Y = AddReportLine(rName, "Stratigraphy:",       "Stratigraphy",            Y, True)
+    Y = AddReportLine(rName, "System:",             "System",                  Y)
+    Y = AddReportLine(rName, "Formation:",          "Formation",               Y)
+    Y = AddReportLine(rName, "Member:",             "Member",                  Y)
+    Y = AddReportLine(rName, "Stage:",              "Stage",                   Y)
+    Y = AddReportLine(rName, "Serie:",              "Serie",                   Y)
+    Y = AddReportLine(rName, "Zone:",               "Zone",                    Y)
+    Y = AddReportLine(rName, "Horizon:",            "Horizon",                 Y)
+
+    ' ================================================================
+    ' SEKCE: POZNÁMKY
+    ' ================================================================
+    Y = AddReportSectionHeader(rName, "REMARKS & REFERENCES", Y)
+    Y = AddReportLine(rName, "Remarks:",            "REMARKS",                 Y, True)
+    Y = AddReportLine(rName, "Reference:",          "Reference",               Y, True)
+
+    ' Page break na konci záznamu
+    CreateReportControl rName, acPageBreak, acDetail, "", "", 0, Y + 200
+
+    rpt.Section(acDetail).Height = Y + 600
+
+    DoCmd.Close acReport, rName, acSaveYes
+    DoCmd.CopyObject , "rptTaxaDetail", acReport, rName
+    DoCmd.DeleteObject acReport, rName
+
+    MsgBox "Report 'rptTaxaDetail' successfully created.", vbInformation
+End Sub
+
+' ----------------------------------------------------------------
+' Pomocná funkce: záhlaví sekce v reportu
+' ----------------------------------------------------------------
+Private Function AddReportSectionHeader(rName As String, title As String, Y As Long) As Long
+    ' Odsazení před sekcí
+    Dim c As Control
+    ' Linka nad nadpisem
+    Set c = CreateReportControl(rName, acLine, acDetail, "", "", 100, Y + 150, 10000, 0)
+    c.BorderColor = &H888888&: c.BorderWidth = 1
+    ' Nadpis sekce
+    Set c = CreateReportControl(rName, acLabel, acDetail, "", "", 100, Y + 250, 10000, 380)
+    c.Caption = title
+    c.FontBold = True: c.FontSize = 11
+    c.ForeColor = &HFF8C00&   ' oranžová = C_ACCENT
+    c.BorderStyle = 0
+    AddReportSectionHeader = Y + 750
+End Function
+
+' ----------------------------------------------------------------
+' Pomocná funkce: jeden řádek label + textbox v reportu
+' ----------------------------------------------------------------
+Private Function AddReportLine(rName As String, lab As String, fld As String, Y As Long, _
+                                Optional isLarge As Boolean = False) As Long
+    Dim H As Long: H = IIf(isLarge, 1200, 400)
+    Dim c As Control
+    ' Label (tučný, šedý)
+    Set c = CreateReportControl(rName, acLabel, acDetail, "", "", 100, Y, 2000, H)
+    c.Caption = lab: c.FontBold = True: c.FontSize = 9: c.ForeColor = 6710886&  ' šedá
+    ' TextBox (hodnota z DB)
+    Set c = CreateReportControl(rName, acTextBox, acDetail, "", "", 2200, Y, 8000, H)
+    c.ControlSource = fld: c.FontSize = 10: c.CanGrow = True: c.BorderStyle = 0
+    c.ForeColor = 0
+    AddReportLine = Y + H + 80
+End Function

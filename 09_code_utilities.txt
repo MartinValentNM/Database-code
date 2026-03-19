@@ -1,0 +1,947 @@
+' ============================================================
+' PACKAGE 4 - TOOLS
+' Spustit: BuildForms_4_Nastroje
+' Creates: frmFindReplace, frmValidator, frmBulkRename, frmNewTaxon,
+'          frmTranslate, frmHistory, frmStats, frmTreeView,
+'          frmSavedFilters, frmDiffViewer
+' ============================================================
+
+Option Compare Database
+Option Explicit
+
+' ===== COLORS =====
+Private Const C_BG As Long = &H202020
+Private Const C_PANEL As Long = &H2B2B2B
+Private Const C_ACCENT As Long = &HFF8C00
+Private Const C_TEXT As Long = &HFFFFFF
+Private Const C_DIM As Long = &HC0C0C0
+Private Const C_BORDER As Long = &H444444
+
+' ===== SHARED HELPERS =====
+
+Private Function GetDeleteTaxonFunction() As String
+    Dim code As String
+    code = "Private Sub btnDeleteTaxon_Click()" & vbCrLf
+    code = code & "    On Error GoTo DelErr" & vbCrLf
+    code = code & "    " & vbCrLf
+    code = code & "    ' Get selected record from subform" & vbCrLf
+    code = code & "    Dim sf As Form: Set sf = Me.subResults.Form" & vbCrLf
+    code = code & "    If sf.Recordset.EOF And sf.Recordset.BOF Then" & vbCrLf
+    code = code & "        MsgBox ""No record selected."", vbInformation: Exit Sub" & vbCrLf
+    code = code & "    End If" & vbCrLf
+    code = code & "    " & vbCrLf
+    code = code & "    Dim tID As Long: tID = Nz(sf.Recordset.Fields(""ID""), 0)" & vbCrLf
+    code = code & "    If tID = 0 Then MsgBox ""Cannot determine record ID."", vbExclamation: Exit Sub" & vbCrLf
+    code = code & "    " & vbCrLf
+    code = code & "    Dim taxonName As String: taxonName = Nz(sf.Recordset.Fields(""TAXON""), ""ID="" & tID)" & vbCrLf
+    code = code & "    " & vbCrLf
+    code = code & "    ' Confirmation" & vbCrLf
+    code = code & "    If MsgBox(""DELETE taxon:"" & Chr(10) & taxonName & Chr(10) & Chr(10) & ""This action can be reversed via UNDO in the detail view."", vbYesNo + vbExclamation) <> vbYes Then Exit Sub" & vbCrLf
+    code = code & "    " & vbCrLf
+    code = code & "    ' Backup to Taxa_History" & vbCrLf
+    code = code & "    Call BackupTaxonForDelete(tID)" & vbCrLf
+    code = code & "    " & vbCrLf
+    code = code & "    ' Delete from all tables" & vbCrLf
+    code = code & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    code = code & "    db.Execute ""DELETE FROM Taxa_Popis WHERE TaxonID="" & tID, 128" & vbCrLf
+    code = code & "    db.Execute ""DELETE FROM Taxa_Material WHERE TaxonID="" & tID, 128" & vbCrLf
+    code = code & "    db.Execute ""DELETE FROM Taxa_Vyskyt WHERE TaxonID="" & tID, 128" & vbCrLf
+    code = code & "    db.Execute ""DELETE FROM Taxa_Taxonomie WHERE TaxonID="" & tID, 128" & vbCrLf
+    code = code & "    db.Execute ""DELETE FROM Taxa_Poznamky WHERE TaxonID="" & tID, 128" & vbCrLf
+    code = code & "    db.Execute ""DELETE FROM Taxa WHERE ID="" & tID, 128" & vbCrLf
+    code = code & "    " & vbCrLf
+    code = code & "    sf.Requery" & vbCrLf
+    code = code & "    MsgBox ""Taxon deleted. Use UNDO in the detail view to restore it."", vbInformation" & vbCrLf
+    code = code & "    Exit Sub" & vbCrLf
+    code = code & "DelErr:" & vbCrLf
+    code = code & "    MsgBox ""DELETE error: "" & Err.Description, vbCritical" & vbCrLf
+    code = code & "End Sub" & vbCrLf
+    GetDeleteTaxonFunction = code
+End Function
+
+Private Sub CreateFindReplaceForm()
+    On Error Resume Next
+    DoCmd.DeleteObject acForm, "frmFindReplace"
+    On Error GoTo 0
+
+    Dim f As Form: Set f = CreateForm
+    Dim fn As String: fn = f.Name
+    With f
+        .Caption = "Find and Replace"
+        .Width = 10000: .PopUp = True: .Modal = True
+        .ScrollBars = 0: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 1
+        .Section(acDetail).BackColor = &H202020
+        .Section(acDetail).Height = 6200
+    End With
+
+    Dim c As Control
+    ' Fields
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 2000, 400)
+    c.Caption = "Field:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+
+    Set c = CreateControl(fn, acListBox, acDetail, "", "", 200, 650, 4500, 3000)
+    c.Name = "lstField": c.RowSourceType = "Value List": c.RowSource = ""
+    c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 10
+
+    ' Search
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 5000, 150, 2000, 400)
+    c.Caption = "Search:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 5000, 650, 4800, 500)
+    c.Name = "txtFind": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 11
+
+    ' Replace
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 5000, 1400, 2000, 400)
+    c.Caption = "Replace:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 5000, 1900, 4800, 500)
+    c.Name = "txtReplace": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 11
+
+    ' Checkbox - filtered records only
+    Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 5000, 2700, 300, 300)
+    c.Name = "chkFilterOnly": c.DefaultValue = "-1"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 5400, 2680, 4000, 400)
+    c.Caption = "Filtered records only": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+
+    ' Result count
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 5000, 3200, 4800, 400)
+    c.Name = "lblResult": c.Caption = "": c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 10
+
+    ' Buttons
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 200, 4000, 2000, 600)
+    c.Name = "btnPreview": c.Caption = "PREVIEW": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.FontSize = 11: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 2400, 4000, 2000, 600)
+    c.Name = "btnExecute": c.Caption = "REPLACE": c.BackColor = &H228844: c.ForeColor = &HFFFFFF
+    c.FontSize = 11: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 4800, 4000, 1800, 600)
+    c.Name = "btnClose": c.Caption = "CLOSE": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 11: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Dim vba As String
+    vba = "Private Sub Form_Load()" & vbCrLf
+    vba = vba & "    Dim fl As String: fl = Nz(TempVars(""BulkFieldList""), """")" & vbCrLf
+    vba = vba & "    Dim parts() As String: parts = Split(fl, ""|"")" & vbCrLf
+    vba = vba & "    Dim rs As String" & vbCrLf
+    vba = vba & "    Dim p As Variant" & vbCrLf
+    vba = vba & "    For Each p In parts" & vbCrLf
+    vba = vba & "        If Trim(p) <> """" Then rs = rs & Chr(34) & Trim(p) & Chr(34) & Chr(59)" & vbCrLf
+    vba = vba & "    Next p" & vbCrLf
+    vba = vba & "    Me!lstField.RowSource = rs" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnPreview_Click()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    If IsNull(Me!lstField.Value) Then MsgBox ""Select a field."", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim fld As String: fld = Me!lstField.Value" & vbCrLf
+    vba = vba & "    Dim findTxt As String: findTxt = Nz(Me!txtFind.Value, """")" & vbCrLf
+    vba = vba & "    If findTxt = """" Then MsgBox ""Enter search text."", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim whereBase As String" & vbCrLf
+    vba = vba & "    If Me!chkFilterOnly Then whereBase = Nz(TempVars(""CurrentFilter""), """")" & vbCrLf
+    vba = vba & "    Dim sql As String: sql = ""SELECT COUNT(*) FROM vw_Complete_Taxa WHERE ["" & fld & ""] LIKE '*"" & Replace(findTxt, ""'"", ""''"") & ""*'""" & vbCrLf
+    vba = vba & "    If whereBase <> """" Then sql = sql & "" AND "" & whereBase" & vbCrLf
+    vba = vba & "    Dim cnt As Long: cnt = DLookup(""Expr1000"", """")" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    cnt = CurrentDb.OpenRecordset(sql).Fields(0)" & vbCrLf
+    vba = vba & "    Me!lblResult.Caption = ""Found "" & cnt & "" records to replace.""" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnExecute_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo ExErr" & vbCrLf
+    vba = vba & "    If IsNull(Me!lstField.Value) Then MsgBox ""Select a field."", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim fld As String: fld = Me!lstField.Value" & vbCrLf
+    vba = vba & "    Dim findTxt As String: findTxt = Nz(Me!txtFind.Value, """")" & vbCrLf
+    vba = vba & "    Dim replTxt As String: replTxt = Nz(Me!txtReplace.Value, """")" & vbCrLf
+    vba = vba & "    If findTxt = """" Then MsgBox ""Enter search text."", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    If MsgBox(""Replace '"" & findTxt & ""' za '"" & replTxt & ""' v poli "" & fld & ""?"", vbYesNo + vbQuestion) <> vbYes Then Exit Sub" & vbCrLf
+    vba = vba & "    Dim whereBase As String" & vbCrLf
+    vba = vba & "    If Me!chkFilterOnly Then whereBase = Nz(TempVars(""CurrentFilter""), """")" & vbCrLf
+    vba = vba & "    Dim sqlSel As String: sqlSel = ""SELECT ID, ["" & fld & ""] FROM vw_Complete_Taxa WHERE ["" & fld & ""] LIKE '*"" & Replace(findTxt, ""'"", ""''"") & ""*'""" & vbCrLf
+    vba = vba & "    If whereBase <> """" Then sqlSel = sqlSel & "" AND "" & whereBase" & vbCrLf
+    vba = vba & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset: Set rs = db.OpenRecordset(sqlSel)" & vbCrLf
+    vba = vba & "    Dim cnt As Long: cnt = 0" & vbCrLf
+    vba = vba & "    Do While Not rs.EOF" & vbCrLf
+    vba = vba & "        Call BackupFieldForUndo(rs!ID, fld)" & vbCrLf
+    vba = vba & "        Dim newVal As String: newVal = Replace(Nz(rs.Fields(fld), """"), findTxt, replTxt)" & vbCrLf
+    vba = vba & "        ' Determine correct table and execute UPDATE" & vbCrLf
+    vba = vba & "        Call UpdateFieldInDB(rs!ID, fld, newVal)" & vbCrLf
+    vba = vba & "        cnt = cnt + 1" & vbCrLf
+    vba = vba & "        rs.MoveNext" & vbCrLf
+    vba = vba & "    Loop" & vbCrLf
+    vba = vba & "    rs.Close" & vbCrLf
+    vba = vba & "    Me!lblResult.Caption = ""Replaced in "" & cnt & "" records.""" & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "ExErr: MsgBox ""Error: "" & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnClose_Click()" & vbCrLf
+    vba = vba & "    DoCmd.Close acForm, Me.Name" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf
+    vba = vba & "    If KeyCode = 27 Then DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf
+
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tFR As String: tFR = f.Name
+    DoCmd.Close acForm, tFR, acSaveYes
+    DoCmd.CopyObject , "frmFindReplace", acForm, tFR
+    DoCmd.DeleteObject acForm, tFR
+End Sub
+
+Private Sub CreateValidatorForm()
+    On Error Resume Next
+    DoCmd.DeleteObject acForm, "frmValidator"
+    On Error GoTo 0
+    Dim f As Form: Set f = CreateForm
+    Dim fn As String: fn = f.Name
+    With f
+        .Caption = "Data Validator": .Width = 18000: .PopUp = True: .Modal = False
+        .ScrollBars = 0: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 2
+        .Section(acDetail).BackColor = &H202020: .Section(acDetail).Height = 10000
+    End With
+    Dim c As Control
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 14000, 600)
+    c.Caption = "DATA VALIDATOR": c.ForeColor = &HBBAA00: c.BackStyle = 0: c.FontSize = 16: c.FontBold = True
+    ' Checkboxy pro typy kontrol
+    Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 950, 300, 300)
+    c.Name = "chkMissing": c.DefaultValue = "-1"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 930, 5000, 400)
+    c.Caption = "Missing required fields (TAXON, AUTHOR, Rank)": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 1450, 300, 300)
+    c.Name = "chkDupTaxon": c.DefaultValue = "-1"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 1430, 5000, 400)
+    c.Caption = "Duplicate TAXON names": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 1950, 300, 300)
+    c.Name = "chkInconsist": c.DefaultValue = "-1"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 1930, 6000, 400)
+    c.Caption = "Inconsistent Family/Order/Class (same genus, different values)": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 2450, 300, 300)
+    c.Name = "chkEmptyGeog": c.DefaultValue = "-1"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 2430, 5000, 400)
+    c.Caption = "Records without Geography and Stratigraphy": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acCheckBox, acDetail, "", "", 200, 2950, 300, 300)
+    c.Name = "chkNoDesc": c.DefaultValue = "0"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 600, 2930, 5000, 400)
+    c.Caption = "Records without Description": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    ' Buttons
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 200, 3600, 2000, 600)
+    c.Name = "btnRun": c.Caption = "RUN VALIDATION": c.BackColor = &H884400: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 2400, 3600, 2000, 600)
+    c.Name = "btnOpenDetail": c.Caption = "OPEN DETAIL": c.BackColor = &H228844: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 4600, 3600, 1500, 600)
+    c.Name = "btnClose": c.Caption = "CLOSE": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 4500, 17400, 400)
+    c.Name = "lblSummary": c.Caption = "": c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+    ' Results sheet
+    Set c = CreateControl(fn, acListBox, acDetail, "", "", 200, 5100, 17400, 4500)
+    c.Name = "lstResults": c.RowSourceType = "Value List": c.RowSource = ""
+    c.BackColor = &H1A1A1A: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 10
+    Dim q As String: q = Chr(34)
+    Dim vba As String
+    vba = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+    vba = vba & "Private g_IDs() As Long" & vbCrLf & "Private g_IDCount As Long" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnRun_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo ValErr" & vbCrLf
+    vba = vba & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset" & vbCrLf
+    vba = vba & "    Dim items As String: items = " & q & q & vbCrLf
+    vba = vba & "    Dim ids As String: ids = " & q & q & vbCrLf
+    vba = vba & "    Dim cnt As Long: cnt = 0" & vbCrLf
+    vba = vba & "    ReDim g_IDs(0 To 5000)" & vbCrLf
+    vba = vba & "    g_IDCount = 0" & vbCrLf
+    vba = vba & "    " & vbCrLf
+    vba = vba & "    If Me!chkMissing Then" & vbCrLf
+    vba = vba & "        Set rs = db.OpenRecordset(" & q & "SELECT ID, TAXON, AUTHOR, Rank FROM Taxa WHERE Len(Nz(TAXON,''))=0 OR Len(Nz(AUTHOR,''))=0 OR Len(Nz(Rank,''))=0" & q & ")" & vbCrLf
+    vba = vba & "        Do While Not rs.EOF" & vbCrLf
+    vba = vba & "            Dim miss As String: miss = " & q & q & vbCrLf
+    vba = vba & "            If Len(Nz(rs!TAXON," & q & q & "))=0 Then miss = miss & " & q & "TAXON " & q & vbCrLf
+    vba = vba & "            If Len(Nz(rs!AUTHOR," & q & q & "))=0 Then miss = miss & " & q & "AUTHOR " & q & vbCrLf
+    vba = vba & "            If Len(Nz(rs!Rank," & q & q & "))=0 Then miss = miss & " & q & "Rank " & q & vbCrLf
+    vba = vba & "            items = items & " & q & "[MISSING:" & q & " & Trim(miss) & " & q & "] ID=" & q & " & rs!ID & " & q & "  " & q & " & Nz(rs!TAXON," & q & "???" & q & ") & " & q & ";" & q & vbCrLf
+    vba = vba & "            g_IDs(g_IDCount) = rs!ID: g_IDCount = g_IDCount + 1: cnt = cnt + 1" & vbCrLf
+    vba = vba & "            rs.MoveNext" & vbCrLf
+    vba = vba & "        Loop: rs.Close" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    " & vbCrLf
+    vba = vba & "    If Me!chkDupTaxon Then" & vbCrLf
+    vba = vba & "        ' Duplicate detection via DCount - avoids Memo IN subquery limitation" & vbCrLf
+    vba = vba & "        Set rs = db.OpenRecordset(" & q & "SELECT ID, TAXON FROM Taxa WHERE Len(Nz(TAXON,''))>0 ORDER BY ID" & q & ")" & vbCrLf
+    vba = vba & "        Do While Not rs.EOF" & vbCrLf
+    vba = vba & "            If DCount(" & q & "*" & q & ", " & q & "Taxa" & q & ", " & q & "TAXON='" & q & " & Replace(Nz(rs!TAXON," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ") & " & q & "'" & q & ") > 1 Then" & vbCrLf
+    vba = vba & "                items = items & " & q & "[DUPLICATE] ID=" & q & " & rs!ID & " & q & "  " & q & " & Nz(rs!TAXON," & q & q & ") & " & q & ";" & q & vbCrLf
+    vba = vba & "                g_IDs(g_IDCount) = rs!ID: g_IDCount = g_IDCount + 1: cnt = cnt + 1" & vbCrLf
+    vba = vba & "            End If" & vbCrLf
+    vba = vba & "            rs.MoveNext" & vbCrLf
+    vba = vba & "        Loop: rs.Close" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    " & vbCrLf
+    vba = vba & "    If Me!chkInconsist Then" & vbCrLf
+    vba = vba & "        Set rs = db.OpenRecordset(" & q & "SELECT t1.ID, t1.TAXON, t1.Genus, t1.Family FROM Taxa t1 WHERE t1.Genus IN (SELECT Genus FROM Taxa WHERE Len(Nz(Genus,''))>0 GROUP BY Genus, Family HAVING Count(DISTINCT Family)>1)" & q & ")" & vbCrLf
+    vba = vba & "        Do While Not rs.EOF" & vbCrLf
+    vba = vba & "            items = items & " & q & "[NEKONZIST.Family] ID=" & q & " & rs!ID & " & q & "  " & q & " & Nz(rs!TAXON," & q & q & ") & " & q & ";" & q & vbCrLf
+    vba = vba & "            g_IDs(g_IDCount) = rs!ID: g_IDCount = g_IDCount + 1: cnt = cnt + 1" & vbCrLf
+    vba = vba & "            rs.MoveNext" & vbCrLf
+    vba = vba & "        Loop: rs.Close" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    " & vbCrLf
+    vba = vba & "    If Me!chkEmptyGeog Then" & vbCrLf
+    vba = vba & "        Set rs = db.OpenRecordset(" & q & "SELECT t.ID, t.TAXON FROM Taxa t LEFT JOIN Taxa_Vyskyt v ON t.ID=v.TaxonID WHERE Len(Nz(v.Geography,''))=0 AND Len(Nz(v.STRATIGRAPHY,''))=0" & q & ")" & vbCrLf
+    vba = vba & "        Do While Not rs.EOF" & vbCrLf
+    vba = vba & "            items = items & " & q & "[BEZ LOKACE] ID=" & q & " & rs!ID & " & q & "  " & q & " & Nz(rs!TAXON," & q & q & ") & " & q & ";" & q & vbCrLf
+    vba = vba & "            g_IDs(g_IDCount) = rs!ID: g_IDCount = g_IDCount + 1: cnt = cnt + 1" & vbCrLf
+    vba = vba & "            rs.MoveNext" & vbCrLf
+    vba = vba & "        Loop: rs.Close" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    " & vbCrLf
+    vba = vba & "    If Me!chkNoDesc Then" & vbCrLf
+    vba = vba & "        Set rs = db.OpenRecordset(" & q & "SELECT t.ID, t.TAXON FROM Taxa t LEFT JOIN Taxa_Popis p ON t.ID=p.TaxonID WHERE Len(Nz(p.DESCRIPTION,''))=0" & q & ")" & vbCrLf
+    vba = vba & "        Do While Not rs.EOF" & vbCrLf
+    vba = vba & "            items = items & " & q & "[BEZ POPISU] ID=" & q & " & rs!ID & " & q & "  " & q & " & Nz(rs!TAXON," & q & q & ") & " & q & ";" & q & vbCrLf
+    vba = vba & "            g_IDs(g_IDCount) = rs!ID: g_IDCount = g_IDCount + 1: cnt = cnt + 1" & vbCrLf
+    vba = vba & "            rs.MoveNext" & vbCrLf
+    vba = vba & "        Loop: rs.Close" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    " & vbCrLf
+    vba = vba & "    Me!lstResults.RowSource = items" & vbCrLf
+    vba = vba & "    Me!lblSummary.Caption = " & q & "Issues found: " & q & " & cnt" & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "ValErr: MsgBox " & q & "Error: " & q & " & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnOpenDetail_Click()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    If IsNull(Me!lstResults.Value) Then MsgBox " & q & "Select a record." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim sel As String: sel = Me!lstResults.Value" & vbCrLf
+    vba = vba & "    Dim p1 As Long: p1 = InStr(sel, " & q & "ID=" & q & ")" & vbCrLf
+    vba = vba & "    If p1 = 0 Then Exit Sub" & vbCrLf
+    vba = vba & "    Dim idStr As String: idStr = Mid(sel, p1 + 3)" & vbCrLf
+    vba = vba & "    Dim spPos As Long: spPos = InStr(idStr, " & q & " " & q & ")" & vbCrLf
+    vba = vba & "    If spPos > 0 Then idStr = Left(idStr, spPos - 1)" & vbCrLf
+    vba = vba & "    Dim tID As Long: tID = CLng(idStr)" & vbCrLf
+    vba = vba & "    DoCmd.OpenForm " & q & "frmDetailTaxa" & q & ", acNormal, , " & q & "ID=" & q & " & tID" & vbCrLf
+    vba = vba & "    If SysCmd(acSysCmdGetObjectState, acForm, " & q & "frmDetailTaxa" & q & ") = 0 Then" & vbCrLf
+    vba = vba & "        MsgBox " & q & "frmDetailTaxa not found - open detail manually." & q & ", vbInformation" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf & _
+        "    If KeyCode = 27 Then DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf & _
+        "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnClose_Click(): DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tV As String: tV = f.Name
+    DoCmd.Close acForm, tV, acSaveYes
+    DoCmd.CopyObject , "frmValidator", acForm, tV
+    DoCmd.DeleteObject acForm, tV
+End Sub
+
+Private Sub CreateBulkRenameForm()
+    On Error Resume Next: DoCmd.DeleteObject acForm, "frmBulkRename": On Error GoTo 0
+    Dim f As Form: Set f = CreateForm: Dim fn As String: fn = f.Name
+    With f
+        .Caption = "Bulk Rename Taxonomic Field": .Width = 13000: .PopUp = True: .Modal = False
+        .ScrollBars = 0: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 2
+        .Section(acDetail).BackColor = &H202020: .Section(acDetail).Height = 10000
+    End With
+    Dim c As Control
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 12000, 600)
+    c.Caption = "BULK RENAME": c.ForeColor = &H884400: c.BackStyle = 0: c.FontSize = 14: c.FontBold = True
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 1000, 2000, 400)
+    c.Caption = "Field:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acComboBox, acDetail, "", "", 2300, 970, 4000, 500)
+    c.Name = "cboField": c.RowSourceType = "Value List"
+    c.RowSource = """Genus"";""Family"";""Order"";""Class"";""Phylum"";""Rank"";""AUTHOR"";""Geography"";""STRATIGRAPHY"""
+    c.DefaultValue = """Family""": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.BorderColor = &H444444: c.FontSize = 11: c.LimitToList = True
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 1700, 2000, 400)
+    c.Caption = "Current value:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acComboBox, acDetail, "", "", 2300, 1670, 10400, 500)
+    c.Name = "cboOldValue": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.BorderColor = &H444444: c.FontSize = 11: c.LimitToList = False
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 2400, 2000, 400)
+    c.Caption = "New value:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 2300, 2370, 10400, 500)
+    c.Name = "txtNewValue": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.BorderColor = &H444444: c.FontSize = 11
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 3100, 12400, 400)
+    c.Name = "lblPreview": c.Caption = "(select field and current value to see affected records)": c.ForeColor = &H888888: c.BackStyle = 0: c.FontSize = 10
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 200, 3800, 2000, 600)
+    c.Name = "btnPreview": c.Caption = "PREVIEW": c.BackColor = &H5580: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 2400, 3800, 2500, 600)
+    c.Name = "btnRename": c.Caption = "APPLY RENAME": c.BackColor = &H884400: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 5100, 3800, 1500, 600)
+    c.Name = "btnClose": c.Caption = "CLOSE": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acListBox, acDetail, "", "", 200, 4700, 12400, 5000)
+    c.Name = "lstAffected": c.RowSourceType = "Value List": c.RowSource = ""
+    c.BackColor = &H1A1A1A: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 10
+
+    Dim q As String: q = Chr(34)
+    Dim vba As String
+    vba = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub cboField_AfterUpdate()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Dim fld As String: fld = Nz(Me!cboField.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    If fld = " & q & q & " Then Exit Sub" & vbCrLf
+    vba = vba & "    Dim tbl As String: tbl = GetTableForField(fld)" & vbCrLf
+    vba = vba & "    Me!cboOldValue.RowSourceType = " & q & "Table/Query" & q & vbCrLf
+    vba = vba & "    Me!cboOldValue.RowSource = " & q & "SELECT DISTINCT [" & q & " & fld & " & q & "] FROM " & q & " & tbl & " & q & " WHERE Len(Nz([" & q & " & fld & " & q & "],''))>0 ORDER BY [" & q & " & fld & " & q & "]" & q & vbCrLf
+    vba = vba & "    Me!cboOldValue.Requery" & vbCrLf
+    vba = vba & "    Me!lblPreview.Caption = " & q & "(select current value)" & q & vbCrLf
+    vba = vba & "    Me!lstAffected.RowSource = " & q & q & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub cboOldValue_AfterUpdate(): btnPreview_Click: End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnPreview_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo PrevErr" & vbCrLf
+    vba = vba & "    Dim fld As String: fld = Nz(Me!cboField.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim oldVal As String: oldVal = Nz(Me!cboOldValue.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    If fld = " & q & q & " Or oldVal = " & q & q & " Then Exit Sub" & vbCrLf
+    vba = vba & "    Dim tbl As String: tbl = GetTableForField(fld)" & vbCrLf
+    vba = vba & "    Dim joinFld As String: joinFld = IIf(tbl = " & q & "Taxa" & q & ", " & q & "ID" & q & ", " & q & "TaxonID" & q & ")" & vbCrLf
+    vba = vba & "    Dim sql As String" & vbCrLf
+    vba = vba & "    sql = " & q & "SELECT t.ID, t.TAXON, t.AUTHOR FROM Taxa t " & q & vbCrLf
+    vba = vba & "    If tbl <> " & q & "Taxa" & q & " Then sql = sql & " & q & "INNER JOIN " & q & " & tbl & " & q & " x ON t.ID=x.TaxonID " & q & vbCrLf
+    vba = vba & "    sql = sql & " & q & "WHERE " & q & " & IIf(tbl=" & q & "Taxa" & q & "," & q & "t" & q & "," & q & "x" & q & ") & " & q & ".[" & q & " & fld & " & q & "]='" & q & " & Replace(oldVal," & q & "'" & q & "," & q & "''" & q & ") & " & q & "' ORDER BY t.TAXON" & q & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset: Set rs = CurrentDb.OpenRecordset(sql)" & vbCrLf
+    vba = vba & "    Dim items As String: items = " & q & q & vbCrLf
+    vba = vba & "    Dim cnt As Long: cnt = 0" & vbCrLf
+    vba = vba & "    Do While Not rs.EOF" & vbCrLf
+    vba = vba & "        items = items & " & q & "ID=" & q & " & rs!ID & " & q & "  " & q & " & Nz(rs!TAXON," & q & q & ") & " & q & "  " & q & " & Nz(rs!AUTHOR," & q & q & ") & " & q & ";" & q & vbCrLf
+    vba = vba & "        cnt = cnt + 1: rs.MoveNext" & vbCrLf
+    vba = vba & "    Loop: rs.Close" & vbCrLf
+    vba = vba & "    Me!lstAffected.RowSource = items" & vbCrLf
+    vba = vba & "    Me!lblPreview.Caption = cnt & " & q & " records will be renamed: [" & q & " & fld & " & q & "] '" & q & " & oldVal & " & q & "' -> '" & q & " & Nz(Me!txtNewValue.Value," & q & "???" & q & ") & " & q & "'" & q & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "PrevErr: MsgBox " & q & "Preview error: " & q & " & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnRename_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo RenErr" & vbCrLf
+    vba = vba & "    Dim fld As String: fld = Nz(Me!cboField.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim oldVal As String: oldVal = Nz(Me!cboOldValue.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    Dim newVal As String: newVal = Trim(Nz(Me!txtNewValue.Value, " & q & q & "))" & vbCrLf
+    vba = vba & "    If fld = " & q & q & " Or oldVal = " & q & q & " Then MsgBox " & q & "Select field and current value." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    If newVal = " & q & q & " Then MsgBox " & q & "Enter new value." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    If oldVal = newVal Then MsgBox " & q & "Old and new values are identical." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim tbl As String: tbl = GetTableForField(fld)" & vbCrLf
+    vba = vba & "    Dim cnt As Long: cnt = DCount(" & q & "*" & q & ", tbl, " & q & "[" & q & " & fld & " & q & "]='" & q & " & Replace(oldVal," & q & "'" & q & "," & q & "''" & q & ") & " & q & "'" & q & ")" & vbCrLf
+    vba = vba & "    If cnt = 0 Then MsgBox " & q & "No records found." & q & ", vbInformation: Exit Sub" & vbCrLf
+    vba = vba & "    If MsgBox(" & q & "Rename [" & q & " & fld & " & q & "] '" & q & " & oldVal & " & q & "' -> '" & q & " & newVal & " & q & "' in " & q & " & cnt & " & q & " records?" & q & ", vbYesNo+vbQuestion) <> vbYes Then Exit Sub" & vbCrLf
+    ' Backup - save each record before change
+    vba = vba & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    vba = vba & "    Dim joinFld As String: joinFld = IIf(tbl = " & q & "Taxa" & q & ", " & q & "ID" & q & ", " & q & "TaxonID" & q & ")" & vbCrLf
+    vba = vba & "    Dim rsBak As DAO.Recordset" & vbCrLf
+    vba = vba & "    Set rsBak = db.OpenRecordset(" & q & "SELECT " & q & " & joinFld & " & q & " FROM " & q & " & tbl & " & q & " WHERE [" & q & " & fld & " & q & "]='" & q & " & Replace(oldVal," & q & "'" & q & "," & q & "''" & q & ") & " & q & "'" & q & ")" & vbCrLf
+    vba = vba & "    Do While Not rsBak.EOF" & vbCrLf
+    vba = vba & "        Call BackupFieldForUndo(rsBak.Fields(0), fld)" & vbCrLf
+    vba = vba & "        rsBak.MoveNext" & vbCrLf
+    vba = vba & "    Loop: rsBak.Close" & vbCrLf
+    ' Execute UPDATE
+    vba = vba & "    db.Execute " & q & "UPDATE [" & q & " & tbl & " & q & "] SET [" & q & " & fld & " & q & "]='" & q & " & Replace(newVal," & q & "'" & q & "," & q & "''" & q & ") & " & q & "' WHERE [" & q & " & fld & " & q & "]='" & q & " & Replace(oldVal," & q & "'" & q & "," & q & "''" & q & ") & " & q & "'" & q & ", 128" & vbCrLf
+    vba = vba & "    MsgBox " & q & "Done: " & q & " & cnt & " & q & " records renamed. UNDO available." & q & ", vbInformation" & vbCrLf
+    vba = vba & "    Me!cboOldValue.Requery: Me!lstAffected.RowSource = " & q & q & vbCrLf
+    vba = vba & "    Me!lblPreview.Caption = " & q & "Rename complete." & q & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "RenErr: MsgBox " & q & "Rename error: " & q & " & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Function GetTableForField(fld As String) As String" & vbCrLf
+    vba = vba & "    Select Case UCase(fld)" & vbCrLf
+    vba = vba & "        Case " & q & "GENUS" & q & ", " & q & "FAMILY" & q & ", " & q & "ORDER" & q & ", " & q & "CLASS" & q & ", " & q & "PHYLUM" & q & ", " & q & "RANK" & q & ", " & q & "AUTHOR" & q & ": GetTableForField = " & q & "Taxa" & q & vbCrLf
+    vba = vba & "        Case " & q & "GEOGRAPHY" & q & ", " & q & "STRATIGRAPHY" & q & ": GetTableForField = " & q & "Taxa_Vyskyt" & q & vbCrLf
+    vba = vba & "        Case Else: GetTableForField = " & q & "Taxa" & q & vbCrLf
+    vba = vba & "    End Select" & vbCrLf
+    vba = vba & "End Function" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf & _
+        "    If KeyCode = 27 Then DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf & _
+        "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnClose_Click(): DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tR As String: tR = f.Name
+    DoCmd.Close acForm, tR, acSaveYes
+    DoCmd.CopyObject , "frmBulkRename", acForm, tR
+    DoCmd.DeleteObject acForm, tR
+End Sub
+
+Private Sub CreateNewTaxonForm()
+    On Error Resume Next: DoCmd.DeleteObject acForm, "frmNewTaxon": On Error GoTo 0
+    Dim f As Form: Set f = CreateForm: Dim fn As String: fn = f.Name
+    With f
+        .Caption = "New Taxon": .Width = 13000: .PopUp = True: .Modal = True
+        .ScrollBars = 2: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 2
+        .Section(acDetail).BackColor = &H202020: .Section(acDetail).Height = 16000
+    End With
+    Dim c As Control
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 12000, 600)
+    c.Caption = "NEW TAXON": c.ForeColor = &H228844: c.BackStyle = 0: c.FontSize = 14: c.FontBold = True
+
+    ' Helper function for label+textbox row
+    Dim fields(13) As String, captions(13) As String
+    fields(0) = "txtNewTaxon":    captions(0) = "TAXON *"
+    fields(1) = "txtNewAuthor":   captions(1) = "Author"
+    fields(2) = "txtNewYear":     captions(2) = "Year"
+    fields(3) = "cboNewRank":     captions(3) = "Rank *"
+    fields(4) = "cboNewGenus":    captions(4) = "Genus"
+    fields(5) = "cboNewFamily":   captions(5) = "Family"
+    fields(6) = "cboNewOrder":    captions(6) = "Order"
+    fields(7) = "cboNewClass":    captions(7) = "Class"
+    fields(8) = "cboNewPhylum":   captions(8) = "Phylum"
+    fields(9) = "txtNewGeog":     captions(9) = "Geography"
+    fields(10) = "txtNewStrat":   captions(10) = "Stratigraphy"
+    fields(11) = "txtNewDesc":    captions(11) = "Description"
+    fields(12) = "txtNewDiag":    captions(12) = "Diagnosis"
+    fields(13) = "txtNewRemarks": captions(13) = "Remarks"
+
+    Dim rowY As Long: rowY = 1000
+    Dim q As String: q = Chr(34)
+    Dim fi As Integer
+    For fi = 0 To 13
+        Dim ctlH As Long: ctlH = 500
+        If fi >= 11 Then ctlH = 1300  ' Description, Diagnosis, Remarks - taller
+        Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, rowY + 80, 2200, 400)
+        c.Caption = captions(fi): c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+        If Left(fields(fi), 3) = "cbo" Then
+            Set c = CreateControl(fn, acComboBox, acDetail, "", "", 2500, rowY, 10200, 500)
+            c.Name = fields(fi): c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+            c.BorderColor = &H444444: c.FontSize = 11: c.LimitToList = False
+            ' RowSource set in VBA Form_Load
+        Else
+            Set c = CreateControl(fn, acTextBox, acDetail, "", "", 2500, rowY, 10200, ctlH)
+            c.Name = fields(fi): c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+            c.BorderColor = &H444444: c.FontSize = 11
+            If fi >= 11 Then c.ScrollBars = 2  ' vertical scrollbar for long text fields
+        End If
+        rowY = rowY + ctlH + 180
+    Next fi
+
+    ' Validation label
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, rowY + 100, 12400, 400)
+    c.Name = "lblValidation": c.Caption = "": c.ForeColor = &HFF: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+
+    ' Buttons
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 200, rowY + 700, 2500, 600)
+    c.Name = "btnCreate": c.Caption = "CREATE TAXON": c.BackColor = &H228844: c.ForeColor = &HFFFFFF
+    c.FontSize = 11: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 2900, rowY + 700, 1500, 600)
+    c.Name = "btnCancel": c.Caption = "CANCEL": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Dim vba As String
+    vba = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+    vba = vba & "Public g_NewID As Long" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub Form_Load()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    ' Populate Rank combobox
+    vba = vba & "    Me!cboNewRank.RowSourceType = " & q & "Value List" & q & vbCrLf
+    Dim rankList As String
+    rankList = "species;subspecies;variety;genus;subgenus;family;subfamily;superfamily;order;suborder;class;subclass;phylum"
+    vba = vba & "    Me!cboNewRank.RowSource = " & q & rankList & q & vbCrLf
+    ' Populate Genus, Family, Order, Class, Phylum combos from existing values
+    vba = vba & "    Me!cboNewGenus.RowSourceType = " & q & "Table/Query" & q & vbCrLf
+    vba = vba & "    Me!cboNewGenus.RowSource = " & q & "SELECT DISTINCT Genus FROM Taxa WHERE Len(Nz(Genus,''))>0 ORDER BY Genus" & q & vbCrLf
+    vba = vba & "    Me!cboNewFamily.RowSourceType = " & q & "Table/Query" & q & vbCrLf
+    vba = vba & "    Me!cboNewFamily.RowSource = " & q & "SELECT DISTINCT Family FROM Taxa WHERE Len(Nz(Family,''))>0 ORDER BY Family" & q & vbCrLf
+    vba = vba & "    Me!cboNewOrder.RowSourceType = " & q & "Table/Query" & q & vbCrLf
+    vba = vba & "    Me!cboNewOrder.RowSource = " & q & "SELECT DISTINCT [Order] FROM Taxa WHERE Len(Nz([Order],''))>0 ORDER BY [Order]" & q & vbCrLf
+    vba = vba & "    Me!cboNewClass.RowSourceType = " & q & "Table/Query" & q & vbCrLf
+    vba = vba & "    Me!cboNewClass.RowSource = " & q & "SELECT DISTINCT [Class] FROM Taxa WHERE Len(Nz([Class],''))>0 ORDER BY [Class]" & q & vbCrLf
+    vba = vba & "    Me!cboNewPhylum.RowSourceType = " & q & "Table/Query" & q & vbCrLf
+    vba = vba & "    Me!cboNewPhylum.RowSource = " & q & "SELECT DISTINCT Phylum FROM Taxa WHERE Len(Nz(Phylum,''))>0 ORDER BY Phylum" & q & vbCrLf
+    ' Autocascade: selecting Genus fills Family/Order/Class/Phylum
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub cboNewGenus_AfterUpdate()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Dim g As String: g = Nz(Me!cboNewGenus.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    If g = " & q & q & " Then Exit Sub" & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset" & vbCrLf
+    vba = vba & "    Set rs = CurrentDb.OpenRecordset(" & q & "SELECT TOP 1 Family, [Order], [Class], Phylum FROM Taxa WHERE Genus='" & q & " & Replace(g," & q & "'" & q & "," & q & "''" & q & ") & " & q & "' AND Len(Nz(Family,''))>0" & q & ")" & vbCrLf
+    vba = vba & "    If Not rs.EOF Then" & vbCrLf
+    vba = vba & "        If Nz(Me!cboNewFamily.Value," & q & q & ") = " & q & q & " Then Me!cboNewFamily.Value = Nz(rs!Family," & q & q & ")" & vbCrLf
+    vba = vba & "        If Nz(Me!cboNewOrder.Value," & q & q & ") = " & q & q & " Then Me!cboNewOrder.Value = Nz(rs![Order]," & q & q & ")" & vbCrLf
+    vba = vba & "        If Nz(Me!cboNewClass.Value," & q & q & ") = " & q & q & " Then Me!cboNewClass.Value = Nz(rs![Class]," & q & q & ")" & vbCrLf
+    vba = vba & "        If Nz(Me!cboNewPhylum.Value," & q & q & ") = " & q & q & " Then Me!cboNewPhylum.Value = Nz(rs!Phylum," & q & q & ")" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    rs.Close" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub txtNewTaxon_AfterUpdate()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Dim nm As String: nm = Trim(Nz(Me!txtNewTaxon.Value, " & q & q & "))" & vbCrLf
+    vba = vba & "    If nm = " & q & q & " Then Me!lblValidation.Caption = " & q & q & ": Exit Sub" & vbCrLf
+    vba = vba & "    Dim cnt As Long: cnt = DCount(" & q & "*" & q & ", " & q & "Taxa" & q & ", " & q & "TAXON='" & q & " & Replace(nm," & q & "'" & q & "," & q & "''" & q & ") & " & q & "'" & q & ")" & vbCrLf
+    vba = vba & "    If cnt > 0 Then" & vbCrLf
+    vba = vba & "        Me!lblValidation.Caption = " & q & "WARNING: TAXON '" & q & " & nm & " & q & "' already exists (" & q & " & cnt & " & q & " record(s))!" & q & vbCrLf
+    vba = vba & "        Me!lblValidation.ForeColor = &H0000FF" & vbCrLf
+    vba = vba & "    Else" & vbCrLf
+    vba = vba & "        Me!lblValidation.Caption = " & q & "OK - taxon name is unique." & q & vbCrLf
+    vba = vba & "        Me!lblValidation.ForeColor = &H228844" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnCreate_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo CreateErr" & vbCrLf
+    vba = vba & "    Dim taxon As String: taxon = Trim(Nz(Me!txtNewTaxon.Value, " & q & q & "))" & vbCrLf
+    vba = vba & "    Dim rank As String: rank = Trim(Nz(Me!cboNewRank.Value, " & q & q & "))" & vbCrLf
+    vba = vba & "    If taxon = " & q & q & " Then MsgBox " & q & "TAXON name is required." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    If rank = " & q & q & " Then MsgBox " & q & "Rank is required." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim db As DAO.Database: Set db = CurrentDb" & vbCrLf
+    vba = vba & "    " & vbCrLf
+    vba = vba & "    ' Check if ID is AutoNumber - if not, assign manually" & vbCrLf
+    vba = vba & "    Dim tdx As DAO.TableDef: Set tdx = db.TableDefs(" & q & "Taxa" & q & ")" & vbCrLf
+    vba = vba & "    Dim fldID As DAO.Field: Set fldID = tdx.Fields(" & q & "ID" & q & ")" & vbCrLf
+    vba = vba & "    Dim isAutoNum As Boolean: isAutoNum = (fldID.Attributes And dbAutoIncrField) <> 0" & vbCrLf
+    vba = vba & "    Dim manualID As Long: manualID = 0" & vbCrLf
+    vba = vba & "    If Not isAutoNum Then" & vbCrLf
+    vba = vba & "        Dim rsMax As DAO.Recordset: Set rsMax = db.OpenRecordset(" & q & "SELECT Nz(MAX(ID),0) AS MaxID FROM Taxa" & q & ")" & vbCrLf
+    vba = vba & "        manualID = rsMax!MaxID + 1: rsMax.Close" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    " & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset: Set rs = db.OpenRecordset(" & q & "Taxa" & q & ", dbOpenDynaset)" & vbCrLf
+    vba = vba & "    rs.AddNew" & vbCrLf
+    vba = vba & "    If Not isAutoNum Then rs!ID = manualID" & vbCrLf
+    vba = vba & "    rs!TAXON  = taxon" & vbCrLf
+    vba = vba & "    rs!AUTHOR = Nz(Me!txtNewAuthor.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    rs!Rank   = rank" & vbCrLf
+    vba = vba & "    rs!Genus  = Nz(Me!cboNewGenus.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    rs!Family = Nz(Me!cboNewFamily.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    rs![Order]  = Nz(Me!cboNewOrder.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    rs![Class]  = Nz(Me!cboNewClass.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    rs!Phylum = Nz(Me!cboNewPhylum.Value, " & q & q & ")" & vbCrLf
+    vba = vba & "    rs.Update" & vbCrLf
+    vba = vba & "    rs.Bookmark = rs.LastModified" & vbCrLf
+    vba = vba & "    g_NewID = rs!ID: rs.Close" & vbCrLf
+    ' Insert into related tables - On Error Resume Next aby duplicita nevyhodila CreateErr
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    db.Execute " & q & "INSERT INTO Taxa_Popis (TaxonID) VALUES (" & q & " & g_NewID & " & q & ")" & q & vbCrLf
+    ' Save Description, Diagnosis, Remarks if filled
+    vba = vba & "    Dim sDesc As String: sDesc = Trim(Nz(Me!txtNewDesc.Value, " & q & q & "))" & vbCrLf
+    vba = vba & "    Dim sDiag As String: sDiag = Trim(Nz(Me!txtNewDiag.Value, " & q & q & "))" & vbCrLf
+    vba = vba & "    Dim sRem As String: sRem = Trim(Nz(Me!txtNewRemarks.Value, " & q & q & "))" & vbCrLf
+    vba = vba & "    If sDesc <> " & q & q & " Then db.Execute " & q & "UPDATE Taxa_Popis SET [DESCRIPTION]='" & q & " & Replace(sDesc," & q & "'" & q & "," & q & "''" & q & ") & " & q & "' WHERE TaxonID=" & q & " & g_NewID" & vbCrLf
+    vba = vba & "    If sDiag <> " & q & q & " Then db.Execute " & q & "UPDATE Taxa_Popis SET [DIAGNOSIS]='" & q & " & Replace(sDiag," & q & "'" & q & "," & q & "''" & q & ") & " & q & "' WHERE TaxonID=" & q & " & g_NewID" & vbCrLf
+    vba = vba & "    If sRem <> " & q & q & " Then db.Execute " & q & "UPDATE Taxa_Poznamky SET [REMARKS]='" & q & " & Replace(sRem," & q & "'" & q & "," & q & "''" & q & ") & " & q & "' WHERE TaxonID=" & q & " & g_NewID" & vbCrLf
+    vba = vba & "    db.Execute " & q & "INSERT INTO Taxa_Material (TaxonID) VALUES (" & q & " & g_NewID & " & q & ")" & q & vbCrLf
+    vba = vba & "    db.Execute " & q & "INSERT INTO Taxa_Vyskyt (TaxonID, Geography, STRATIGRAPHY) VALUES (" & q & " & g_NewID & " & q & ", '" & q & " & Replace(Nz(Me!txtNewGeog.Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ") & " & q & "', '" & q & " & Replace(Nz(Me!txtNewStrat.Value," & q & q & ")," & q & "'" & q & "," & q & "''" & q & ") & " & q & "')" & q & vbCrLf
+    vba = vba & "    db.Execute " & q & "INSERT INTO Taxa_Taxonomie (TaxonID) VALUES (" & q & " & g_NewID & " & q & ")" & q & vbCrLf
+    vba = vba & "    db.Execute " & q & "INSERT INTO Taxa_Poznamky (TaxonID) VALUES (" & q & " & g_NewID & " & q & ")" & q & vbCrLf
+    vba = vba & "    On Error GoTo CreateErr" & vbCrLf
+    vba = vba & "    TempVars.Add " & q & "NewTaxonID" & q & ", g_NewID" & vbCrLf
+    vba = vba & "    MsgBox " & q & "Taxon created with ID=" & q & " & g_NewID & Chr(10) & " & q & "Opening detail form..." & q & ", vbInformation" & vbCrLf
+    vba = vba & "    DoCmd.Close acForm, Me.Name" & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "CreateErr: MsgBox " & q & "Create error: " & q & " & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnCancel_Click(): g_NewID = 0: DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+    vba = vba & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf
+    vba = vba & "    If KeyCode = 27 Then g_NewID = 0: DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf
+
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tN As String: tN = f.Name
+    DoCmd.Close acForm, tN, acSaveYes
+    DoCmd.CopyObject , "frmNewTaxon", acForm, tN
+    DoCmd.DeleteObject acForm, tN
+End Sub
+
+
+Private Sub CreateHistoryForm()
+    On Error Resume Next
+    DoCmd.DeleteObject acForm, "frmHistory"
+    On Error GoTo 0
+
+    Dim f As Form: Set f = CreateForm
+    Dim fn As String: fn = f.Name
+    With f
+        .Caption = "Change History"
+        .Width = 18000: .PopUp = True: .Modal = False
+        .ScrollBars = 0: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 2
+        .Section(acDetail).BackColor = &H202020
+        .Section(acDetail).Height = 9000
+    End With
+
+    Dim c As Control
+    ' Filter - TaxonID or all
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 2000, 400)
+    c.Caption = "TaxonID (0=all):": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 2300, 120, 1200, 500)
+    c.Name = "txtFilterID": c.DefaultValue = """0""": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.BorderColor = &H444444: c.FontSize = 11
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 3800, 150, 2000, 400)
+    c.Caption = "Action type:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acComboBox, acDetail, "", "", 5200, 120, 2000, 500)
+    c.Name = "cboActionType": c.RowSourceType = "Value List"
+    c.RowSource = """(all)"";"" EDIT"";""DELETE"";""MERGE"";""BULK"""
+    c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444
+    c.FontSize = 10: c.LimitToList = False
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 7500, 110, 1800, 560)
+    c.Name = "btnRefresh": c.Caption = "LOAD": c.BackColor = &H228844: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 9500, 110, 2000, 560)
+    c.Name = "btnUndoSelected": c.Caption = "UNDO SELECTED": c.BackColor = &H5580: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 11700, 110, 1800, 560)
+    c.Name = "btnDeleteHist": c.Caption = "DELETE": c.BackColor = &HAA: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 13700, 110, 1500, 560)
+    c.Name = "btnClose": c.Caption = "CLOSE": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    ' Subform showing Taxa_History as datasheet
+    Set c = CreateControl(fn, acSubform, acDetail, "", "", 200, 900, 17400, 7800)
+    c.Name = "subHistory"
+    c.SourceObject = "Table.Taxa_History"
+    c.LinkMasterFields = "": c.LinkChildFields = ""
+
+    Dim vba As String
+    vba = "Private Sub Form_Load()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Dim tID As Long: tID = Nz(TempVars(""HistoryTaxonID""), 0)" & vbCrLf
+    vba = vba & "    If tID > 0 Then Me!txtFilterID.Value = tID" & vbCrLf
+    vba = vba & "    btnRefresh_Click" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnRefresh_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo 0" & vbCrLf
+    vba = vba & "    Dim tID As Long: tID = Nz(Me!txtFilterID.Value, 0)" & vbCrLf
+    vba = vba & "    Dim aType As String: aType = Trim(Nz(Me!cboActionType.Value, ""(all)""))" & vbCrLf
+    vba = vba & "    Dim sql As String: sql = ""SELECT HistoryID, TaxonID, ActionType, TableName, FieldName, Left(Nz(OldValue,''),100) AS OldValueShort, ChangeDate FROM Taxa_History""" & vbCrLf
+    vba = vba & "    Dim where As String: where = " & Chr(34) & Chr(34) & vbCrLf
+    vba = vba & "    If tID > 0 Then where = ""TaxonID="" & tID" & vbCrLf
+    vba = vba & "    If aType <> ""(all)"" And aType <> """" Then" & vbCrLf
+    vba = vba & "        If where <> """" Then where = where & "" AND """ & vbCrLf
+    vba = vba & "        where = where & ""ActionType='"" & aType & ""'""" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    If where <> """" Then sql = sql & "" WHERE "" & where" & vbCrLf
+    vba = vba & "    sql = sql & "" ORDER BY ChangeDate DESC, HistoryID DESC""" & vbCrLf
+    vba = vba & "    Me!subHistory.Form.RecordSource = sql" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnUndoSelected_Click()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Dim sf As Form: Set sf = Me!subHistory.Form" & vbCrLf
+    vba = vba & "    If sf.Recordset.EOF Then MsgBox ""No record selected."", vbInformation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim hID As Long: hID = sf.Recordset.Fields(""HistoryID"")" & vbCrLf
+    vba = vba & "    Dim tID As Long: tID = sf.Recordset.Fields(""TaxonID"")" & vbCrLf
+    vba = vba & "    Dim tbl As String: tbl = sf.Recordset.Fields(""TableName"")" & vbCrLf
+    vba = vba & "    Dim fld As String: fld = sf.Recordset.Fields(""FieldName"")" & vbCrLf
+    vba = vba & "    Dim oldVal As String: oldVal = Nz(sf.Recordset.Fields(""OldValueShort""), """")" & vbCrLf
+    vba = vba & "    Dim aType As String: aType = sf.Recordset.Fields(""ActionType"")" & vbCrLf
+    vba = vba & "    If MsgBox(""Restore: "" & fld & "" for TaxonID="" & tID & ""?"", vbYesNo) <> vbYes Then Exit Sub" & vbCrLf
+    vba = vba & "    If aType = ""DELETE"" Or aType = ""MERGE"" Then" & vbCrLf
+    vba = vba & "        Call RestoreTaxonFromHistory(tID)" & vbCrLf
+    vba = vba & "    Else" & vbCrLf
+    vba = vba & "        Dim whereF As String: whereF = IIf(tbl = ""Taxa"", ""ID"", ""TaxonID"")" & vbCrLf
+    vba = vba & "        CurrentDb.Execute ""UPDATE ["" & tbl & ""] SET ["" & fld & ""] = '"" & Replace(oldVal, ""'"", ""''"") & ""' WHERE ["" & whereF & ""] = "" & tID, 128" & vbCrLf
+    vba = vba & "        CurrentDb.Execute ""DELETE FROM Taxa_History WHERE HistoryID="" & hID, 128" & vbCrLf
+    vba = vba & "    End If" & vbCrLf
+    vba = vba & "    btnRefresh_Click" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnDeleteHist_Click()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Dim sf As Form: Set sf = Me!subHistory.Form" & vbCrLf
+    vba = vba & "    If sf.Recordset.EOF Then Exit Sub" & vbCrLf
+    vba = vba & "    Dim hID As Long: hID = sf.Recordset.Fields(""HistoryID"")" & vbCrLf
+    vba = vba & "    If MsgBox(""Permanently delete this history record?"", vbYesNo + vbExclamation) <> vbYes Then Exit Sub" & vbCrLf
+    vba = vba & "    CurrentDb.Execute ""DELETE FROM Taxa_History WHERE HistoryID="" & hID, 128" & vbCrLf
+    vba = vba & "    btnRefresh_Click" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)" & vbCrLf & _
+        "    If KeyCode = 27 Then DoCmd.Close acForm, Me.Name: KeyCode = 0" & vbCrLf & _
+        "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnClose_Click(): DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim tHist As String: tHist = f.Name
+    DoCmd.Close acForm, tHist, acSaveYes
+    DoCmd.CopyObject , "frmHistory", acForm, tHist
+    DoCmd.DeleteObject acForm, tHist
+End Sub
+
+
+
+
+Private Sub CreateDiffViewerForm()
+    On Error Resume Next: DoCmd.DeleteObject acForm, "frmDiffViewer": On Error GoTo 0
+    Dim f As Form: Set f = CreateForm: Dim fn As String: fn = f.Name
+    With f
+        .Caption = "History Diff Viewer": .Width = 25000: .PopUp = True: .Modal = False
+        .ScrollBars = 0: .NavigationButtons = False: .RecordSelectors = False
+        .AutoCenter = True: .BorderStyle = 2
+        .Section(acDetail).BackColor = &H1A1A1A: .Section(acDetail).Height = 14000
+    End With
+    Dim c As Control
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 150, 12000, 600)
+    c.Caption = "DIFF VIEWER": c.ForeColor = &HFF6600: c.BackStyle = 0: c.FontSize = 14: c.FontBold = True
+
+    ' Header row - record and version selection
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 950, 1500, 400)
+    c.Caption = "Taxon ID:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 1800, 920, 2000, 500)
+    c.Name = "txtDiffTaxonID": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF: c.BorderColor = &H444444: c.FontSize = 10
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 4100, 950, 2000, 400)
+    c.Caption = "History version:": c.ForeColor = &HC0C0C0: c.BackStyle = 0: c.FontSize = 10
+    Set c = CreateControl(fn, acComboBox, acDetail, "", "", 6200, 920, 5000, 500)
+    c.Name = "cboHistVersion": c.BackColor = &H2B2B2B: c.ForeColor = &HFFFFFF
+    c.BorderColor = &H444444: c.FontSize = 10: c.LimitToList = True
+
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 11400, 900, 1800, 560)
+    c.Name = "btnLoadDiff": c.Caption = "LOAD DIFF": c.BackColor = &HFF6600: c.ForeColor = &H0
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+    Set c = CreateControl(fn, acCommandButton, acDetail, "", "", 13400, 900, 1500, 560)
+    c.Name = "btnCloseDiff": c.Caption = "CLOSE": c.BackColor = &H111155: c.ForeColor = &HFFFFFF
+    c.FontSize = 10: c.FontBold = True: c.OnClick = "[Event Procedure]"
+
+    ' Two panels side-by-side
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 1800, 11000, 400)
+    c.Caption = "CURRENT STATE": c.ForeColor = &H228844: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 12500, 1800, 11000, 400)
+    c.Caption = "HISTORICAL VERSION": c.ForeColor = &HFF6600: c.BackStyle = 0: c.FontSize = 10: c.FontBold = True
+
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 200, 2350, 11000, 11000)
+    c.Name = "txtCurrent": c.Locked = True: c.BackColor = &HD1F0D
+    c.ForeColor = &H88FF88: c.FontSize = 9: c.BorderColor = &H336633: c.FontName = "Courier New"
+    Set c = CreateControl(fn, acTextBox, acDetail, "", "", 12500, 2350, 11000, 11000)
+    c.Name = "txtHistoric": c.Locked = True: c.BackColor = &H1F0D0D
+    c.ForeColor = &HFF8888: c.FontSize = 9: c.BorderColor = &H663333: c.FontName = "Courier New"
+
+    Set c = CreateControl(fn, acLabel, acDetail, "", "", 200, 13500, 23000, 400)
+    c.Name = "lblDiffSummary": c.Caption = "": c.ForeColor = &HFF8C00: c.BackStyle = 0: c.FontSize = 9
+
+    Dim q As String: q = Chr(34)
+    Dim vba As String
+    vba = "Option Compare Database" & vbCrLf & "Option Explicit" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub Form_Load()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Dim tid As Long: tid = Nz(TempVars(" & q & "DiffTaxonID" & q & "), 0)" & vbCrLf
+    vba = vba & "    If tid > 0 Then Me!txtDiffTaxonID.Value = tid: LoadHistoryVersions tid" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub txtDiffTaxonID_AfterUpdate()" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Dim tid As Long: tid = Nz(Me!txtDiffTaxonID.Value, 0)" & vbCrLf
+    vba = vba & "    If tid > 0 Then LoadHistoryVersions tid" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub LoadHistoryVersions(tid As Long)" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Me!cboHistVersion.RowSourceType = " & q & "Table/Query" & q & vbCrLf
+    vba = vba & "    Me!cboHistVersion.RowSource = " & q & "SELECT DISTINCT HistoryID, Format(ChangeDate,'dd.mm.yyyy hh:nn') & ' - ' & ActionType & ': ' & Nz(FieldName,'') FROM Taxa_History WHERE TaxonID=" & q & " & tid & " & q & " ORDER BY ChangeDate DESC" & q & vbCrLf
+    vba = vba & "    Me!cboHistVersion.ColumnCount = 2: Me!cboHistVersion.ColumnWidths = " & q & "0;5000" & q & vbCrLf
+    vba = vba & "    Me!cboHistVersion.BoundColumn = 1" & vbCrLf
+    vba = vba & "    Me!cboHistVersion.Requery" & vbCrLf
+    vba = vba & "    LoadCurrentState tid" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub LoadCurrentState(tid As Long)" & vbCrLf
+    vba = vba & "    On Error Resume Next" & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset" & vbCrLf
+    vba = vba & "    Set rs = CurrentDb.OpenRecordset(" & q & "SELECT t.TAXON, t.AUTHOR, t.Rank, t.Genus, t.Family, t.[Order], t.[Class], t.Phylum, p.DESCRIPTION, p.DIAGNOSIS, m.SYNONYMY, v.Geography, v.STRATIGRAPHY, v.Locality, z.REMARKS FROM Taxa t LEFT JOIN Taxa_Popis p ON t.ID=p.TaxonID LEFT JOIN Taxa_Material m ON t.ID=m.TaxonID LEFT JOIN Taxa_Vyskyt v ON t.ID=v.TaxonID LEFT JOIN Taxa_Poznamky z ON t.ID=z.TaxonID WHERE t.ID=" & q & " & tid)" & vbCrLf
+    vba = vba & "    If rs.EOF Then rs.Close: Exit Sub" & vbCrLf
+    vba = vba & "    Dim out As String: out = " & q & "=== CURRENT STATE ===" & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    Dim fi As Integer" & vbCrLf
+    vba = vba & "    For fi = 0 To rs.Fields.Count - 1" & vbCrLf
+    vba = vba & "        If Nz(rs.Fields(fi), " & q & q & ") <> " & q & q & " Then" & vbCrLf
+    vba = vba & "            out = out & rs.Fields(fi).Name & " & q & ": " & q & " & Nz(rs.Fields(fi), " & q & q & ") & Chr(10)" & vbCrLf
+    vba = vba & "        End If" & vbCrLf
+    vba = vba & "    Next fi" & vbCrLf
+    vba = vba & "    rs.Close" & vbCrLf
+    vba = vba & "    Me!txtCurrent.Value = out" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+
+    vba = vba & "Private Sub btnLoadDiff_Click()" & vbCrLf
+    vba = vba & "    On Error GoTo DiffErr" & vbCrLf
+    vba = vba & "    Dim tid As Long: tid = Nz(Me!txtDiffTaxonID.Value, 0)" & vbCrLf
+    vba = vba & "    If tid = 0 Then MsgBox " & q & "Enter a Taxon ID." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim histID As Long: histID = Nz(Me!cboHistVersion.Value, 0)" & vbCrLf
+    vba = vba & "    If histID = 0 Then MsgBox " & q & "Select a history version." & q & ", vbExclamation: Exit Sub" & vbCrLf
+    vba = vba & "    Dim rs As DAO.Recordset" & vbCrLf
+    vba = vba & "    Set rs = CurrentDb.OpenRecordset(" & q & "SELECT FieldName, OldValue, NewValue, ActionType, ChangeDate FROM Taxa_History WHERE HistoryID=" & q & " & histID)" & vbCrLf
+    vba = vba & "    If rs.EOF Then MsgBox " & q & "No history record found." & q & ", vbInformation: rs.Close: Exit Sub" & vbCrLf
+    vba = vba & "    Dim histOut As String: histOut = " & q & "=== HISTORICAL VERSION ===" & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    histOut = histOut & " & q & "Action: " & q & " & Nz(rs!ActionType, " & q & q & ") & Chr(10)" & vbCrLf
+    vba = vba & "    histOut = histOut & " & q & "Date:   " & q & " & Format(Nz(rs!ChangeDate), " & q & "dd.mm.yyyy hh:nn:ss" & q & ") & Chr(10)" & vbCrLf
+    vba = vba & "    histOut = histOut & " & q & "Field:  " & q & " & Nz(rs!FieldName, " & q & "(all)" & q & ") & Chr(10)" & vbCrLf
+    vba = vba & "    histOut = histOut & Chr(10) & " & q & "--- OLD VALUE ---" & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    histOut = histOut & Nz(rs!OldValue, " & q & "(empty)" & q & ") & Chr(10)" & vbCrLf
+    vba = vba & "    histOut = histOut & Chr(10) & " & q & "--- NEW VALUE (at time of change) ---" & q & " & Chr(10)" & vbCrLf
+    vba = vba & "    histOut = histOut & Nz(rs!NewValue, " & q & "(empty)" & q & ") & Chr(10)" & vbCrLf
+    vba = vba & "    rs.Close" & vbCrLf
+    ' Diff summary
+    vba = vba & "    Dim cntChanged As Long: cntChanged = DCount(" & q & "*" & q & ", " & q & "Taxa_History" & q & ", " & q & "TaxonID=" & q & " & tid)" & vbCrLf
+    vba = vba & "    Me!lblDiffSummary.Caption = " & q & "Taxon ID " & q & " & tid & " & q & " has " & q & " & cntChanged & " & q & " history entries. Showing: HistoryID=" & q & " & histID" & vbCrLf
+    vba = vba & "    Me!txtHistoric.Value = histOut" & vbCrLf
+    vba = vba & "    LoadCurrentState tid" & vbCrLf
+    vba = vba & "    Exit Sub" & vbCrLf
+    vba = vba & "DiffErr: MsgBox " & q & "Diff error: " & q & " & Err.Description, vbCritical" & vbCrLf
+    vba = vba & "End Sub" & vbCrLf & vbCrLf
+    vba = vba & "Private Sub btnCloseDiff_Click(): DoCmd.Close acForm, Me.Name: End Sub" & vbCrLf
+
+    f.HasModule = True
+    f.KeyPreview = True
+    If f.Module.CountOfLines > 0 Then f.Module.DeleteLines 1, f.Module.CountOfLines
+    f.Module.InsertLines 1, vba
+    Dim td As String: td = f.Name
+    DoCmd.Close acForm, td, acSaveYes
+    DoCmd.CopyObject , "frmDiffViewer", acForm, td
+    DoCmd.DeleteObject acForm, td
+End Sub
+
+
+Public Sub BuildForms_4_Nastroje()
+    On Error GoTo Err4
+    Debug.Print "1/7 CreateFindReplaceForm..."
+    CreateFindReplaceForm
+    Debug.Print "2/7 CreateValidatorForm..."
+    CreateValidatorForm
+    Debug.Print "3/7 CreateBulkRenameForm..."
+    CreateBulkRenameForm
+    Debug.Print "4/7 CreateNewTaxonForm..."
+    CreateNewTaxonForm
+    Debug.Print "5/7 CreateHistoryForm..."
+    CreateHistoryForm
+    Debug.Print "6/6 CreateDiffViewerForm..."
+    CreateDiffViewerForm
+    MsgBox "PACKAGE 4 OK: Tools created.", vbInformation
+    Exit Sub
+Err4:
+    MsgBox "ERROR in package 4!" & Chr(10) & "Error " & Err.Number & ": " & Err.Description, vbCritical
+End Sub
