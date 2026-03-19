@@ -1,0 +1,175 @@
+<job>
+<script language="VBScript">
+Option Explicit
+
+' ============================================================
+' FINAL SYNCHRONIZED IMPORT SCRIPT
+' - All citations removed
+' - Comments in English
+' - Column structure matches the Python script exactly
+' - All variables defined to prevent execution errors
+' ============================================================
+
+Dim fso, dbPath, xlsPath, logPath, logFile, acc, db, xl, xlWb, xlWs, dbRs
+Dim i, sheetName, lastRow, lastCol, r, c, val, rowCount, qSql, percent
+Dim fldNames(), sheets(5), isConsole
+
+Set fso = CreateObject("Scripting.FileSystemObject")
+dbPath  = fso.GetAbsolutePathName("Hyolith_Database.accdb")
+xlsPath = fso.GetAbsolutePathName("vw_Complete_Taxa.xlsx")
+logPath = fso.GetAbsolutePathName("import_log.txt")
+
+' Detect environment to avoid console errors
+isConsole = (UCase(Right(WScript.FullName, 11)) = "CSCRIPT.EXE")
+Set logFile = fso.CreateTextFile(logPath, True)
+
+Sub Log(msg)
+    If isConsole Then WScript.StdOut.WriteLine Now & "  " & msg
+    logFile.WriteLine Now & "  " & msg
+End Sub
+
+Sub ShowProgress(current, total, sName)
+    If isConsole And total > 0 Then
+        percent = Int((current / total) * 100)
+        WScript.StdOut.Write Chr(13) & sName & ": " & percent & "% (" & current & "/" & total & ")   "
+    End If
+End Sub
+
+Function IsNumericField(tblName, fldName)
+    Dim numFields, check
+    ' IDs are numeric, others are LONGTEXT
+    numFields = "|Taxa.ID|Taxa_Taxonomie.TaxonID|Taxa_Popis.TaxonID|Taxa_Material.TaxonID|Taxa_Vyskyt.TaxonID|Taxa_Poznamky.TaxonID|"
+    check = "|" & tblName & "." & fldName & "|"
+    IsNumericField = (InStr(1, numFields, check, 1) > 0)
+End Function
+
+Log "=== STARTING DATABASE IMPORT ==="
+
+' 1. Cleanup old database file
+If fso.FileExists(dbPath) Then 
+    On Error Resume Next
+    fso.DeleteFile dbPath, True
+    If Err.Number <> 0 Then
+        Log "ERROR: Could not delete old DB. Ensure it is closed in Access!"
+        WScript.Echo "Close Access before running the script!"
+        WScript.Quit 1
+    End If
+    On Error GoTo 0
+End If
+
+' 2. Initialize Applications
+On Error Resume Next
+Set acc = CreateObject("Access.Application")
+acc.NewCurrentDatabase dbPath
+Set db = acc.CurrentDb
+Set xl = CreateObject("Excel.Application")
+xl.Visible = False
+xl.DisplayAlerts = False
+Set xlWb = xl.Workbooks.Open(xlsPath)
+
+If Err.Number <> 0 Then
+    Log "CRITICAL ERROR: " & Err.Description
+    WScript.Echo "Startup Error: " & Err.Description
+    WScript.Quit 1
+End If
+On Error GoTo 0
+
+' 3. Create Tables matching Python structure
+Log "Creating table structure..."
+
+db.Execute "CREATE TABLE [Taxa] ([ID] LONG PRIMARY KEY, [TAXON] LONGTEXT, [Genus] LONGTEXT, [Species] LONGTEXT, [AUTHOR] LONGTEXT, [Phylum] LONGTEXT, [Family] LONGTEXT, [Order] LONGTEXT, [Class] LONGTEXT, [Rank] LONGTEXT)"
+
+db.Execute "CREATE TABLE [Taxa_Taxonomie] ([TaxonID] LONG PRIMARY KEY, [TAXONOMIC PLACEMENT] LONGTEXT, [Taxonomy_path] LONGTEXT, [TAXON] LONGTEXT, [TYPE TAXON] LONGTEXT, [INCLUDED TAXONS] LONGTEXT)"
+
+db.Execute "CREATE TABLE [Taxa_Popis] ([TaxonID] LONG PRIMARY KEY, [ETYMOLOGY] LONGTEXT, [DESCRIPTION] LONGTEXT, [SIZE] LONGTEXT, [DIAGNOSIS] LONGTEXT, [APERTURE] LONGTEXT, [CROSS-SECTION] LONGTEXT, [OPERCULUM] LONGTEXT, [SCULPTURE] LONGTEXT, [CLAVICLES] LONGTEXT, [CARDINAL_PROCESSES] LONGTEXT)"
+
+db.Execute "CREATE TABLE [Taxa_Material] ([TaxonID] LONG PRIMARY KEY, [TYPE MATERIAL] LONGTEXT, [MATERIAL EXAMINED] LONGTEXT, [FIGURES] LONGTEXT, [SYNONYMY] LONGTEXT)"
+
+db.Execute "CREATE TABLE [Taxa_Vyskyt] ([TaxonID] LONG PRIMARY KEY, [OCCURRENCE] LONGTEXT, [Geography] LONGTEXT, [Locality] LONGTEXT, [STRATIGRAPHY] LONGTEXT, [System] LONGTEXT, [Formation] LONGTEXT, [Member] LONGTEXT, [Stage] LONGTEXT, [Serie] LONGTEXT, [Zone] LONGTEXT, [Horizon] LONGTEXT)"
+
+db.Execute "CREATE TABLE [Taxa_Poznamky] ([TaxonID] LONG PRIMARY KEY, [REMARKS] LONGTEXT, [Reference] LONGTEXT)"
+
+sheets(0) = "Taxa"
+sheets(1) = "Taxa_Taxonomie"
+sheets(2) = "Taxa_Popis"
+sheets(3) = "Taxa_Material"
+sheets(4) = "Taxa_Vyskyt"
+sheets(5) = "Taxa_Poznamky"
+
+' 4. Data Import Loop
+For i = 0 To 5
+    sheetName = sheets(i)
+    Set xlWs = Nothing
+    On Error Resume Next
+    Set xlWs = xlWb.Sheets(sheetName)
+    On Error GoTo 0
+    
+    If Not xlWs Is Nothing Then
+        lastRow = xlWs.UsedRange.Rows.Count
+        lastCol = xlWs.UsedRange.Columns.Count
+        
+        If lastRow >= 2 Then
+            ReDim fldNames(lastCol - 1)
+            For c = 1 To lastCol
+                fldNames(c-1) = Trim(CStr(xlWs.Cells(1, c).Value))
+            Next
+
+            Set dbRs = db.OpenRecordset(sheetName)
+            rowCount = 0
+            Log "Importing sheet: " & sheetName
+
+            For r = 2 To lastRow
+                If r Mod 20 = 0 Or r = lastRow Then ShowProgress r-1, lastRow-1, sheetName
+                
+                dbRs.AddNew
+                For c = 0 To lastCol - 1
+                    If fldNames(c) <> "" Then
+                        val = xlWs.Cells(r, c + 1).Value
+                        If Not IsEmpty(val) And Not IsNull(val) Then
+                            On Error Resume Next
+                            If IsNumericField(sheetName, fldNames(c)) Then
+                                If IsNumeric(val) Then dbRs.Fields(fldNames(c)).Value = CLng(val)
+                            Else
+                                dbRs.Fields(fldNames(c)).Value = CStr(val)
+                            End If
+                            On Error GoTo 0
+                        End If
+                    End If
+                Next
+                dbRs.Update
+                rowCount = rowCount + 1
+            Next
+            If isConsole Then WScript.StdOut.WriteLine ""
+            Log "  -> OK: " & rowCount & " rows processed."
+            dbRs.Close
+        End If
+    End If
+Next
+
+' 5. Create final View Query (vw_Complete_taxa)
+Log "Generating final SQL View..."
+qSql = "SELECT T.*, " & _
+       "TT.[TAXONOMIC PLACEMENT], TT.[Taxonomy_path], TT.[TYPE TAXON], TT.[INCLUDED TAXONS], " & _
+       "TP.[ETYMOLOGY], TP.[DESCRIPTION], TP.[SIZE], TP.[DIAGNOSIS], TP.[APERTURE], TP.[CROSS-SECTION], TP.[OPERCULUM], TP.[SCULPTURE], TP.[CLAVICLES], TP.[CARDINAL_PROCESSES], " & _
+       "TM.[TYPE MATERIAL], TM.[MATERIAL EXAMINED], TM.[FIGURES], TM.[SYNONYMY], " & _
+       "TV.[OCCURRENCE], TV.[Geography], TV.[Locality], TV.[STRATIGRAPHY], TV.[System], TV.[Formation], TV.[Member], TV.[Stage], TV.[Serie], TV.[Zone], TV.[Horizon], " & _
+       "TPOZ.[REMARKS], TPOZ.[Reference] " & _
+       "FROM ((((Taxa T " & _
+       "LEFT JOIN Taxa_Taxonomie TT ON T.ID=TT.TaxonID) " & _
+       "LEFT JOIN Taxa_Popis TP ON T.ID=TP.TaxonID) " & _
+       "LEFT JOIN Taxa_Material TM ON T.ID=TM.TaxonID) " & _
+       "LEFT JOIN Taxa_Vyskyt TV ON T.ID=TV.TaxonID) " & _
+       "LEFT JOIN Taxa_Poznamky TPOZ ON T.ID=TPOZ.TaxonID"
+
+db.CreateQueryDef "vw_Complete_taxa", qSql
+
+' Finalize and Close
+xlWb.Close False
+xl.Quit
+db.Close
+acc.Quit
+
+Log "=== IMPORT SUCCESSFULLY COMPLETED ==="
+WScript.Echo "Success! The DATABASE was created succesfully."
+</script>
+</job>
